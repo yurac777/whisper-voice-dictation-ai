@@ -18,7 +18,14 @@ from faster_whisper import WhisperModel
 MODELS = {}
 ICON_PATH = os.path.join(os.path.dirname(__file__), "whisper_icon.ico")
 
-INITIAL_PROMPT = "Привет! Это профессиональная диктовка текста на русском языке с техническими терминами и англицизмами: Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux, Online, Web."
+# Western Whisper SOTA Initial Prompt for perfect Russian dictation + English technical terms
+INITIAL_PROMPT = (
+    "Привет! Это точная диктовка текста на русском языке с техническими терминами, брендами и англицизмами: "
+    "Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, "
+    "OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, "
+    "Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript, "
+    "C++, Rust, Go, SQL, PostgreSQL, MongoDB, Kubernetes, Redis, HTTP, JSON, Prompts, DirectML, AMD, Radeon."
+)
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -63,10 +70,8 @@ def convert_current_selection_layout():
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading faster-whisper model '{size}' (INT8 optimized for 10-core CPU)...")
-        # Handle 'large-v3-turbo' model alias
-        model_name = "large-v3" if size == "large-v3" else size
-        MODELS[size] = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=10)
+        print(f"Loading Western OpenAI Whisper model '{size}' (INT8 optimized for 10-core CPU)...")
+        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -167,13 +172,17 @@ class TranscribeThread(QThread):
 
     def run(self):
         model = get_whisper_model(self.model_size)
+        # Highly optimized decoding parameters for maximum speed and accuracy
         segments, info = model.transcribe(
             self.audio_file, 
             beam_size=1, 
+            best_of=1,
+            temperature=0.0,
+            condition_on_previous_text=False,
             language="ru", 
             initial_prompt=INITIAL_PROMPT,
             vad_filter=True, 
-            vad_parameters=dict(min_silence_duration_ms=500)
+            vad_parameters=dict(min_silence_duration_ms=400)
         )
         text = " ".join([segment.text for segment in segments]).strip()
         self.finished_signal.emit(text)
@@ -312,7 +321,7 @@ class DictationWidget(QWidget):
 
         # 5. Model Selector Combo
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["Быстрый (small)", "Точный (medium)", "🚀 Large-v3"])
+        self.model_combo.addItems(["⚡ Быстрый (small)", "🎯 Точный (medium)", "🚀 Макс (large-v3)"])
         self.model_combo.setFixedHeight(30)
         self.model_combo.setMinimumWidth(160)
         self.model_combo.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
