@@ -13,7 +13,40 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout,
                              QSystemTrayIcon, QMenu, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 
-def ensure_single_instance():
+def ensure_single_instance()
+
+def convert_current_selection_layout():
+    try:
+        # Copy highlighted text
+        pyperclip.copy("")
+        time.sleep(0.02)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+        win32api.keybd_event(ord('C'), 0, 0, 0)
+        time.sleep(0.05)
+        win32api.keybd_event(ord('C'), 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.05)
+        
+        text = pyperclip.paste()
+        if text:
+            ru_cnt = sum(1 for c in text if 'а' <= c <= 'я' or 'А' <= c <= 'Я')
+            en_cnt = sum(1 for c in text if 'a' <= c <= 'z' or 'A' <= c <= 'Z')
+            if en_cnt >= ru_cnt:
+                converted = text.translate(EN_TO_RU)
+            else:
+                converted = text.translate(RU_TO_EN)
+                
+            pyperclip.copy(converted)
+            time.sleep(0.05)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+            win32api.keybd_event(ord('V'), 0, 0, 0)
+            time.sleep(0.03)
+            win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+            print("Converted layout for selected text:", converted)
+    except Exception as e:
+        print("Layout conversion error:", e)
+:
     lock_file = os.path.join(os.environ.get("TEMP", "."), "whisper_dictation_app.lock")
     if os.path.exists(lock_file):
         try:
@@ -37,6 +70,39 @@ def ensure_single_instance():
         pass
 
 ensure_single_instance()
+
+def convert_current_selection_layout():
+    try:
+        # Copy highlighted text
+        pyperclip.copy("")
+        time.sleep(0.02)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+        win32api.keybd_event(ord('C'), 0, 0, 0)
+        time.sleep(0.05)
+        win32api.keybd_event(ord('C'), 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.05)
+        
+        text = pyperclip.paste()
+        if text:
+            ru_cnt = sum(1 for c in text if 'а' <= c <= 'я' or 'А' <= c <= 'Я')
+            en_cnt = sum(1 for c in text if 'a' <= c <= 'z' or 'A' <= c <= 'Z')
+            if en_cnt >= ru_cnt:
+                converted = text.translate(EN_TO_RU)
+            else:
+                converted = text.translate(RU_TO_EN)
+                
+            pyperclip.copy(converted)
+            time.sleep(0.05)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+            win32api.keybd_event(ord('V'), 0, 0, 0)
+            time.sleep(0.03)
+            win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+            print("Converted layout for selected text:", converted)
+    except Exception as e:
+        print("Layout conversion error:", e)
+
 
 from faster_whisper import WhisperModel
 
@@ -475,6 +541,11 @@ class DictationWidget(QWidget):
 
         try:
             keyboard.add_hotkey('esc', lambda: self.cancel_signal.emit())
+        try:
+            keyboard.add_hotkey('pause', lambda: convert_current_selection_layout())
+        except Exception as e:
+            print("Pause hotkey error:", e)
+
         except Exception as e:
             print("ESC listener error:", e)
 
