@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, time, wave, threading, psutil
+import sys, os, time, wave, threading, psutil, subprocess
 import sounddevice as sd
 import numpy as np
 import pyperclip
@@ -16,16 +16,25 @@ from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 from faster_whisper import WhisperModel
 
 MODELS = {}
-ICON_PATH = os.path.join(os.path.dirname(__file__), "whisper_icon.ico")
+PROJ_DIR = os.path.dirname(__file__)
+DICT_PATH = os.path.join(PROJ_DIR, "dictionary.txt")
+ICON_PATH = os.path.join(PROJ_DIR, "whisper_icon.ico")
 
-# Western Whisper SOTA Initial Prompt for perfect Russian dictation + English technical terms
-INITIAL_PROMPT = (
-    "Привет! Это точная диктовка текста на русском языке с техническими терминами, брендами и англицизмами: "
-    "Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, "
-    "OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, "
-    "Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript, "
-    "C++, Rust, Go, SQL, PostgreSQL, MongoDB, Kubernetes, Redis, HTTP, JSON, Prompts, DirectML, AMD, Radeon."
-)
+def load_custom_dictionary():
+    if not os.path.exists(DICT_PATH):
+        default_words = "Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript, C++, Rust, Go, SQL, PostgreSQL, MongoDB, Kubernetes, Redis, HTTP, JSON, Prompts, DirectML, AMD, Radeon, DeepSeek, Claude, Gemini, Ollama"
+        with open(DICT_PATH, "w", encoding="utf-8") as f:
+            f.write(default_words)
+        return "Привет! Это диктовка: " + default_words
+    
+    try:
+        with open(DICT_PATH, "r", encoding="utf-8") as f:
+            lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+            words_str = ", ".join(lines)
+            return "Привет! Это профессиональная диктовка текста с терминами и англицизмами: " + words_str
+    except Exception as e:
+        print("Error reading dictionary file:", e)
+        return "Привет! Это профессиональная диктовка текста на русском языке."
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -66,6 +75,14 @@ def convert_current_selection_layout():
             print("Converted layout for selected text:", converted)
     except Exception as e:
         print("Layout conversion error:", e)
+
+def open_dictionary_in_notepad():
+    if not os.path.exists(DICT_PATH):
+        load_custom_dictionary()
+    try:
+        subprocess.Popen(["notepad.exe", DICT_PATH])
+    except Exception as e:
+        print("Failed to open dictionary.txt:", e)
 
 def get_whisper_model(size="small"):
     global MODELS
@@ -172,7 +189,8 @@ class TranscribeThread(QThread):
 
     def run(self):
         model = get_whisper_model(self.model_size)
-        # Highly optimized decoding parameters for maximum speed and accuracy
+        prompt = load_custom_dictionary()
+        # Fast decoding parameters for maximum throughput
         segments, info = model.transcribe(
             self.audio_file, 
             beam_size=1, 
@@ -180,7 +198,7 @@ class TranscribeThread(QThread):
             temperature=0.0,
             condition_on_previous_text=False,
             language="ru", 
-            initial_prompt=INITIAL_PROMPT,
+            initial_prompt=prompt,
             vad_filter=True, 
             vad_parameters=dict(min_silence_duration_ms=400)
         )
@@ -276,27 +294,27 @@ class DictationWidget(QWidget):
         self.layout_btn.clicked.connect(convert_current_selection_layout)
         pill_layout.addWidget(self.layout_btn)
 
-        # 3. Auto-Paste Toggle Button
-        self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
-        self.autopaste_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.autopaste_btn.setFixedHeight(30)
-        self.autopaste_btn.setMinimumWidth(125)
-        self.autopaste_enabled = True
-        self.autopaste_btn.setStyleSheet("""
+        # 3. Custom Dictionary Button
+        self.dict_btn = QPushButton("📖 Словарь")
+        self.dict_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.dict_btn.setFixedHeight(30)
+        self.dict_btn.setMinimumWidth(110)
+        self.dict_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
-                color: #a6e3a1;
-                border: 1px solid #a6e3a1;
+                color: #f9e2af;
+                border: 1px solid #f9e2af;
                 border-radius: 15px;
                 padding: 0px 12px;
             }
             QPushButton:hover {
-                background-color: #a6e3a1;
+                background-color: #f9e2af;
                 color: #11111b;
             }
         """)
-        self.autopaste_btn.clicked.connect(self.toggle_autopaste)
-        pill_layout.addWidget(self.autopaste_btn)
+        self.dict_btn.setToolTip("Редактировать пользовательский словарь терминов и брендов")
+        self.dict_btn.clicked.connect(open_dictionary_in_notepad)
+        pill_layout.addWidget(self.dict_btn)
 
         # 4. History Button
         self.history_btn = QPushButton("📜 История")

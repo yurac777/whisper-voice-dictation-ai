@@ -1,0 +1,14 @@
+# Словарь терминов и англицизмов для Whisper AI (добавляйте свои слова по 1 на строку или через запятую)
+Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab,
+OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS,
+Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript,
+C++, Rust, Go, SQL, PostgreSQL, MongoDB, Kubernetes, Redis, HTTP, JSON, Prompts, DirectML, AMD, Radeon,
+Nvidia, CUDA, Intel, Ryzen, Realtime, Frontend, Backend, Fullstack, DevOps, Microservices, Git, GitLab,
+Bitbucket, Jira, Confluence, Trello, Asana, Dockerfile, Container, Podman, Helm, Terraform, Ansible,
+GraphQL, REST, gRPC, WebSocket, OAuth, JWT, SSL, TLS, Nginx, Apache, Caddy, Cloudflare, AWS, Azure,
+GCP, S3, EC2, Lambda, Serverless, Vercel, Netlify, Render, Supabase, Firebase, Prisma, Drizzle, ORM,
+Tailwind, Bootstrap, Sass, Webpack, Vite, Turbopack, Babel, ESLint, Prettier, npm, yarn, pnpm, pip,
+poetry, conda, venv, WSL, Powershell, Bash, Zsh, Terminal, Command Line, Prompt, LLM, GPT-4, Claude,
+Gemini, Llama, Mistral, Ollama, DeepSeek, Midjourney, Stable Diffusion, RunPod, Vast.ai, HuggingFace,
+PyCharm, WebStorm, VSCode, Xcode, Android Studio, Postman, Insomnia, DBeaver, TablePlus, Wireshark,
+Proxmox, ESXi, TrueNAS, Unraid, Home Assistant, Zigbee, Matter, ESP32, Raspberry Pi, Arduino
