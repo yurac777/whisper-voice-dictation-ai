@@ -63,7 +63,7 @@ def convert_current_selection_layout():
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading faster-whisper '{size}' INT8 model with AMD Radeon 880M / DirectML & CPU threads...")
+        print(f"Loading faster-whisper '{size}' INT8 model for AMD Ryzen AI...")
         MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
@@ -203,37 +203,37 @@ class DictationWidget(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # Transparent outer container without drop shadow halo
+        # Transparent outer container without DWM halo shadow artifact
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
         # Single Clean Dark Glassmorphic Pill Bar
-        self.pill_bar = QWidget()
+        self.pill_bar = QWidget(self)
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
             QWidget#PillBar {
-                background-color: #181825;
+                background-color: #1e1e2e;
                 border: 1px solid #313244;
-                border-radius: 22px;
+                border-radius: 20px;
             }
         """)
 
         pill_layout = QHBoxLayout(self.pill_bar)
-        pill_layout.setContentsMargins(14, 8, 14, 8)
-        pill_layout.setSpacing(10)
+        pill_layout.setContentsMargins(12, 6, 12, 6)
+        pill_layout.setSpacing(8)
 
         # 1. Record Pill Button
         self.status_btn = QPushButton("🔴 Запись (Колесико)")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.status_btn.setFixedHeight(32)
-        self.status_btn.setMinimumWidth(170)
+        self.status_btn.setFixedHeight(30)
+        self.status_btn.setMinimumWidth(165)
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #89b4fa;
                 border: 1px solid #89b4fa;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
             QPushButton:hover {
@@ -247,14 +247,14 @@ class DictationWidget(QWidget):
         # 2. Layout Switcher Button
         self.layout_btn = QPushButton("🌐 EN ↔ RU (Pause)")
         self.layout_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.layout_btn.setFixedHeight(32)
-        self.layout_btn.setMinimumWidth(155)
+        self.layout_btn.setFixedHeight(30)
+        self.layout_btn.setMinimumWidth(150)
         self.layout_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #fab387;
                 border: 1px solid #fab387;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
             QPushButton:hover {
@@ -269,15 +269,15 @@ class DictationWidget(QWidget):
         # 3. Auto-Paste Toggle Button
         self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
         self.autopaste_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.autopaste_btn.setFixedHeight(32)
-        self.autopaste_btn.setMinimumWidth(130)
+        self.autopaste_btn.setFixedHeight(30)
+        self.autopaste_btn.setMinimumWidth(125)
         self.autopaste_enabled = True
         self.autopaste_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #a6e3a1;
                 border: 1px solid #a6e3a1;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 12px;
             }
             QPushButton:hover {
@@ -291,14 +291,14 @@ class DictationWidget(QWidget):
         # 4. History Button
         self.history_btn = QPushButton("📜 История")
         self.history_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.history_btn.setFixedHeight(32)
-        self.history_btn.setMinimumWidth(115)
+        self.history_btn.setFixedHeight(30)
+        self.history_btn.setMinimumWidth(110)
         self.history_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #cba6f7;
                 border: 1px solid #cba6f7;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 12px;
             }
             QPushButton:hover {
@@ -309,19 +309,19 @@ class DictationWidget(QWidget):
         self.history_btn.clicked.connect(self.toggle_history_drawer)
         pill_layout.addWidget(self.history_btn)
 
-        # 5. Model Selector Combo (With Large-v3 AMD Radeon GPU option!)
+        # 5. Model Selector Combo
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Быстрый (small)", "Точный (medium)", "🚀 Макс (large-v3)"])
-        self.model_combo.setFixedHeight(32)
-        self.model_combo.setMinimumWidth(170)
+        self.model_combo.setFixedHeight(30)
+        self.model_combo.setMinimumWidth(160)
         self.model_combo.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.model_combo.setStyleSheet("""
             QComboBox {
                 background-color: #2a2b3d;
                 color: #89dceb;
                 border: 1px solid #89dceb;
-                border-radius: 16px;
-                padding: 0px 12px;
+                border-radius: 15px;
+                padding: 0px 10px;
             }
             QComboBox::drop-down {
                 border: none;
@@ -339,14 +339,14 @@ class DictationWidget(QWidget):
         # 6. Cancel Button
         self.cancel_btn = QPushButton("❌ Отмена")
         self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.cancel_btn.setFixedHeight(32)
-        self.cancel_btn.setMinimumWidth(110)
+        self.cancel_btn.setFixedHeight(30)
+        self.cancel_btn.setMinimumWidth(105)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #f38ba8;
                 border: 1px solid #f38ba8;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 10px;
             }
             QPushButton:hover {
@@ -359,14 +359,14 @@ class DictationWidget(QWidget):
 
         # 7. Circular Close Button (X)
         self.close_btn = QPushButton("✕")
-        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setFixedSize(28, 28)
         self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #f38ba8;
                 border: 1px solid #f38ba8;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px;
             }
             QPushButton:hover {
@@ -420,8 +420,8 @@ class DictationWidget(QWidget):
         outer_layout.addWidget(self.history_drawer)
 
         screen = QApplication.primaryScreen().geometry()
-        self.setFixedWidth(960)
-        self.move((screen.width() - 960) // 2, 35)
+        self.setFixedWidth(940)
+        self.move((screen.width() - 940) // 2, 35)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -439,7 +439,7 @@ class DictationWidget(QWidget):
         tray_menu.addAction(quit_action)
 
         self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.setToolTip("Whisper AI Голосовой Ввод (AMD Radeon GPU + DirectML)")
+        self.tray_icon.setToolTip("Whisper AI Голосовой Ввод")
         self.tray_icon.show()
 
     def toggle_visibility(self):
@@ -458,7 +458,7 @@ class DictationWidget(QWidget):
                     background-color: #2a2b3d;
                     color: #a6e3a1;
                     border: 1px solid #a6e3a1;
-                    border-radius: 16px;
+                    border-radius: 15px;
                     padding: 0px 12px;
                 }
                 QPushButton:hover {
@@ -473,7 +473,7 @@ class DictationWidget(QWidget):
                     background-color: #2a2b3d;
                     color: #f9e2af;
                     border: 1px solid #f9e2af;
-                    border-radius: 16px;
+                    border-radius: 15px;
                     padding: 0px 12px;
                 }
                 QPushButton:hover {
@@ -511,7 +511,7 @@ class DictationWidget(QWidget):
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
         """)
@@ -537,7 +537,7 @@ class DictationWidget(QWidget):
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
         """)
@@ -552,7 +552,7 @@ class DictationWidget(QWidget):
                 background-color: #f9e2af;
                 color: #11111b;
                 border: 1px solid #f9e2af;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
         """)
@@ -587,7 +587,7 @@ class DictationWidget(QWidget):
                     background-color: #a6e3a1;
                     color: #11111b;
                     border: 1px solid #a6e3a1;
-                    border-radius: 16px;
+                    border-radius: 15px;
                     padding: 0px 14px;
                 }
             """)
@@ -604,7 +604,7 @@ class DictationWidget(QWidget):
                 background-color: #2a2b3d;
                 color: #89b4fa;
                 border: 1px solid #89b4fa;
-                border-radius: 16px;
+                border-radius: 15px;
                 padding: 0px 14px;
             }
             QPushButton:hover {
