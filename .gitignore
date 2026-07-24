@@ -11,3 +11,8 @@ __pycache__/
 .idea/
 Thumbs.db
 Desktop.ini
+
+# Build outputs
+build/
+dist/
+*.spec

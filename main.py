@@ -135,48 +135,51 @@ class AudioRecorder:
         self.sample_rate = sample_rate
         self.recording = False
         self.audio_data = []
+        self.record_thread = None
+
+    def _record_loop(self):
+        try:
+            with sd.InputStream(samplerate=self.sample_rate, channels=1, dtype='float32') as stream:
+                while self.recording:
+                    data, _ = stream.read(1024)
+                    if self.recording and len(data) > 0:
+                        self.audio_data.append(data.copy())
+        except Exception as e:
+            print("Recording loop error:", e)
 
     def start(self):
         self.audio_data = []
         self.recording = True
-        def callback(indata, frames, time, status):
-            if self.recording:
-                self.audio_data.append(indata.copy())
-        
-        self.stream = sd.InputStream(samplerate=self.sample_rate, channels=1, callback=callback)
-        self.stream.start()
+        self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
+        self.record_thread.start()
 
     def stop(self, out_filename):
         self.recording = False
-        if hasattr(self, 'stream'):
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception:
-                pass
+        if self.record_thread and self.record_thread.is_alive():
+            self.record_thread.join(timeout=1.0)
         
         if not self.audio_data:
             return False
             
-        data = np.concatenate(self.audio_data, axis=0)
-        data_int16 = (data * 32767).astype(np.int16)
-        
-        with wave.open(out_filename, 'wb') as wf:
-            wf.setnchannels(1)
-            wf.setsampwidth(2)
-            wf.setframerate(self.sample_rate)
-            wf.writeframes(data_int16.tobytes())
-        return True
+        try:
+            data = np.concatenate(self.audio_data, axis=0)
+            data_int16 = (data * 32767).astype(np.int16)
+            
+            with wave.open(out_filename, 'wb') as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(data_int16.tobytes())
+            return True
+        except Exception as e:
+            print("Error writing WAV file:", e)
+            return False
 
     def cancel(self):
         self.recording = False
         self.audio_data = []
-        if hasattr(self, 'stream'):
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception:
-                pass
+        if self.record_thread and self.record_thread.is_alive():
+            self.record_thread.join(timeout=0.5)
 
 class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
