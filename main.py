@@ -14,20 +14,30 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout,
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 
 # Kill previous instances of main.py
-def kill_old_instances():
-    current_pid = os.getpid()
-    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+def ensure_single_instance():
+    lock_file = os.path.join(os.environ.get("TEMP", "."), "whisper_dictation_app.lock")
+    if os.path.exists(lock_file):
         try:
-            if proc.info['pid'] != current_pid and proc.info['cmdline']:
-                cmd = " ".join(proc.info['cmdline'])
-                if "main.py" in cmd or "whisper_dictation" in cmd:
-                    if proc.info['pid'] != current_pid:
-                        print(f"Terminating old process PID {proc.info['pid']}...")
-                        proc.kill()
+            with open(lock_file, "r") as f:
+                old_pid = int(f.read().strip())
+            if old_pid != os.getpid() and psutil.pid_exists(old_pid):
+                try:
+                    p = psutil.Process(old_pid)
+                    if "python" in p.name().lower():
+                        print(f"Terminating old dictation instance PID {old_pid}...")
+                        p.kill()
+                        time.sleep(0.3)
+                except Exception:
+                    pass
         except Exception:
             pass
+    try:
+        with open(lock_file, "w") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
 
-kill_old_instances()
+ensure_single_instance()
 
 from faster_whisper import WhisperModel
 
