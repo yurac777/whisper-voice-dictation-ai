@@ -17,29 +17,7 @@ from faster_whisper import WhisperModel
 
 MODELS = {}
 PROJ_DIR = os.path.dirname(__file__)
-DICT_PATH = os.path.join(PROJ_DIR, "dictionary.txt")
 ICON_PATH = os.path.join(PROJ_DIR, "whisper_icon.ico")
-
-def load_custom_dictionary():
-    default_text = "Привет! Диктовка: Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux"
-    if not os.path.exists(DICT_PATH):
-        try:
-            with open(DICT_PATH, "w", encoding="utf-8") as f:
-                f.write("Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux")
-        except Exception:
-            pass
-        return default_text[:240]
-    
-    try:
-        with open(DICT_PATH, "r", encoding="utf-8") as f:
-            lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
-            words_str = ", ".join(lines)
-            full_prompt = "Привет! Диктовка: " + words_str
-            # Slicing prompt to 240 chars max to prevent Whisper token overflow crash
-            return full_prompt[:240]
-    except Exception as e:
-        print("Error reading dictionary file:", e)
-        return default_text[:240]
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -80,14 +58,6 @@ def convert_current_selection_layout():
             print("Converted layout for selected text:", converted)
     except Exception as e:
         print("Layout conversion error:", e)
-
-def open_dictionary_in_notepad():
-    if not os.path.exists(DICT_PATH):
-        load_custom_dictionary()
-    try:
-        subprocess.Popen(["notepad.exe", DICT_PATH])
-    except Exception as e:
-        print("Failed to open dictionary.txt:", e)
 
 def get_whisper_model(size="small"):
     global MODELS
@@ -196,7 +166,7 @@ class TranscribeThread(QThread):
     def run(self):
         try:
             model = get_whisper_model(self.model_size)
-            prompt = load_custom_dictionary()
+            # Pure clean transcribe call with zero initial_prompt parameters
             segments, info = model.transcribe(
                 self.audio_file, 
                 beam_size=1, 
@@ -204,7 +174,6 @@ class TranscribeThread(QThread):
                 temperature=0.0,
                 condition_on_previous_text=False,
                 language="ru", 
-                initial_prompt=prompt,
                 vad_filter=True, 
                 vad_parameters=dict(min_silence_duration_ms=400)
             )
@@ -303,27 +272,27 @@ class DictationWidget(QWidget):
         self.layout_btn.clicked.connect(convert_current_selection_layout)
         pill_layout.addWidget(self.layout_btn)
 
-        # 3. Custom Dictionary Button
-        self.dict_btn = QPushButton("📖 Словарь")
-        self.dict_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.dict_btn.setFixedHeight(30)
-        self.dict_btn.setMinimumWidth(110)
-        self.dict_btn.setStyleSheet("""
+        # 3. Auto-Paste Toggle Button
+        self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
+        self.autopaste_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.autopaste_btn.setFixedHeight(30)
+        self.autopaste_btn.setMinimumWidth(125)
+        self.autopaste_enabled = True
+        self.autopaste_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
-                color: #f9e2af;
-                border: 1px solid #f9e2af;
+                color: #a6e3a1;
+                border: 1px solid #a6e3a1;
                 border-radius: 15px;
                 padding: 0px 12px;
             }
             QPushButton:hover {
-                background-color: #f9e2af;
+                background-color: #a6e3a1;
                 color: #11111b;
             }
         """)
-        self.dict_btn.setToolTip("Редактировать пользовательский словарь терминов и брендов")
-        self.dict_btn.clicked.connect(open_dictionary_in_notepad)
-        pill_layout.addWidget(self.dict_btn)
+        self.autopaste_btn.clicked.connect(self.toggle_autopaste)
+        pill_layout.addWidget(self.autopaste_btn)
 
         # 4. History Button
         self.history_btn = QPushButton("📜 История")
@@ -457,8 +426,8 @@ class DictationWidget(QWidget):
         outer_layout.addWidget(self.history_drawer)
 
         screen = QApplication.primaryScreen().geometry()
-        self.setFixedWidth(940)
-        self.move((screen.width() - 940) // 2, 35)
+        self.setFixedWidth(870)
+        self.move((screen.width() - 870) // 2, 35)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
