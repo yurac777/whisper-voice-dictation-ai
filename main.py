@@ -7,17 +7,19 @@ import win32gui, win32con, win32api, win32process
 from pynput import mouse
 import keyboard
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPoint
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
                              QVBoxLayout, QLabel, QListWidget, QComboBox,
-                             QSystemTrayIcon, QMenu, QWidgetAction)
-from PyQt6.QtGui import QFont, QIcon, QAction, QColor
+                             QSystemTrayIcon, QMenu)
+from PyQt6.QtGui import QFont, QIcon, QAction, QColor, QPixmap, QPainter, QBrush, QPen, QCursor
 
 from faster_whisper import WhisperModel
 
 MODELS = {}
 PROJ_DIR = os.path.dirname(__file__)
 ICON_PATH = os.path.join(PROJ_DIR, "whisper_icon.ico")
+
+INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -27,6 +29,28 @@ RU_TO_EN = str.maketrans(
     "ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,",
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?"
 )
+
+def create_tray_icon_pixmap(color_hex, recording=False):
+    pixmap = QPixmap(32, 32)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    
+    # Outer Glow Ring
+    painter.setBrush(QBrush(QColor(color_hex)))
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawEllipse(2, 2, 28, 28)
+    
+    # Inner Mic Dot
+    if recording:
+        painter.setBrush(QBrush(QColor("#ffffff")))
+        painter.drawEllipse(10, 10, 12, 12)
+    else:
+        painter.setBrush(QBrush(QColor("#1e1e2e")))
+        painter.drawEllipse(8, 8, 16, 16)
+        
+    painter.end()
+    return QIcon(pixmap)
 
 def convert_current_selection_layout():
     try:
@@ -173,6 +197,7 @@ class TranscribeThread(QThread):
                 temperature=0.0,
                 condition_on_previous_text=False,
                 language="ru", 
+                initial_prompt=INITIAL_PROMPT,
                 vad_filter=True, 
                 vad_parameters=dict(min_silence_duration_ms=400)
             )
@@ -197,6 +222,10 @@ class DictationWidget(QWidget):
         self.autopaste_enabled = True
         self.current_model = "small"
         self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
+        
+        self.idle_icon = create_tray_icon_pixmap("#89b4fa", False)
+        self.rec_icon = create_tray_icon_pixmap("#f38ba8", True)
+        self.proc_icon = create_tray_icon_pixmap("#f9e2af", False)
         
         self.toggle_signal.connect(self.toggle_recording)
         self.cancel_signal.connect(self.cancel_dictation)
@@ -268,7 +297,7 @@ class DictationWidget(QWidget):
                 color: #ffffff;
             }
         """)
-        self.menu_btn.setToolTip("Настройки и дополнительный инструмент")
+        self.menu_btn.setToolTip("Настройки и инструменты")
         self.menu_btn.clicked.connect(self.show_tools_menu)
         pill_layout.addWidget(self.menu_btn)
 
@@ -355,9 +384,18 @@ class DictationWidget(QWidget):
         self.history_drawer.hide()
         outer_layout.addWidget(self.history_drawer)
 
-        screen = QApplication.primaryScreen().geometry()
         self.setFixedWidth(320)
-        self.move((screen.width() - 320) // 2, 30)
+        self.move_to_active_monitor()
+
+    def move_to_active_monitor(self):
+        # Dynamic active monitor positioning based on cursor location!
+        cursor_pos = QCursor.pos()
+        screen = QApplication.screenAt(cursor_pos)
+        if not screen:
+            screen = QApplication.primaryScreen()
+        
+        geo = screen.geometry()
+        self.move((geo.x() + (geo.width() - self.width()) // 2), geo.y() + 30)
 
     def show_tools_menu(self):
         menu = QMenu(self)
@@ -423,6 +461,8 @@ class DictationWidget(QWidget):
         if os.path.exists(ICON_PATH):
             self.tray_icon.setIcon(QIcon(ICON_PATH))
             self.setWindowIcon(QIcon(ICON_PATH))
+        else:
+            self.tray_icon.setIcon(self.idle_icon)
 
         tray_menu = QMenu()
         show_action = QAction("Показать / Скрыть виджет", self)
@@ -441,6 +481,7 @@ class DictationWidget(QWidget):
         if self.isVisible():
             self.hide()
         else:
+            self.move_to_active_monitor()
             self.show()
             self.activateWindow()
 
@@ -470,7 +511,9 @@ class DictationWidget(QWidget):
             self.stop_dictation()
 
     def start_dictation(self):
+        self.move_to_active_monitor()
         self.is_recording = True
+        self.tray_icon.setIcon(self.rec_icon)
         self.status_btn.setText("🔴 Запись...")
         self.status_btn.setStyleSheet("""
             QPushButton {
@@ -497,6 +540,7 @@ class DictationWidget(QWidget):
                 print("Thread terminate exception:", e)
             self.is_transcribing = False
 
+        self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("🚫 Отменено")
         self.status_btn.setStyleSheet("""
             QPushButton {
@@ -512,6 +556,7 @@ class DictationWidget(QWidget):
     def stop_dictation(self):
         self.is_recording = False
         self.is_transcribing = True
+        self.tray_icon.setIcon(self.proc_icon)
         self.status_btn.setText("⚡ Распознавание...")
         self.status_btn.setStyleSheet("""
             QPushButton {
@@ -535,6 +580,7 @@ class DictationWidget(QWidget):
     def on_transcribe_error(self, err):
         self.is_transcribing = False
         print("Transcription Error caught gracefully:", err)
+        self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("⚠️ Ошибка")
         self.status_btn.setStyleSheet("""
             QPushButton {
@@ -578,6 +624,7 @@ class DictationWidget(QWidget):
     def reset_btn(self):
         self.is_recording = False
         self.is_transcribing = False
+        self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("🔴 Запись (Колесико)")
         self.status_btn.setStyleSheet("""
             QPushButton {
