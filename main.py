@@ -21,20 +21,25 @@ DICT_PATH = os.path.join(PROJ_DIR, "dictionary.txt")
 ICON_PATH = os.path.join(PROJ_DIR, "whisper_icon.ico")
 
 def load_custom_dictionary():
+    default_text = "Привет! Диктовка: Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux"
     if not os.path.exists(DICT_PATH):
-        default_words = "Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript, C++, Rust, Go, SQL, PostgreSQL, MongoDB, Kubernetes, Redis, HTTP, JSON, Prompts, DirectML, AMD, Radeon, DeepSeek, Claude, Gemini, Ollama"
-        with open(DICT_PATH, "w", encoding="utf-8") as f:
-            f.write(default_words)
-        return "Привет! Это диктовка: " + default_words
+        try:
+            with open(DICT_PATH, "w", encoding="utf-8") as f:
+                f.write("Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux")
+        except Exception:
+            pass
+        return default_text[:240]
     
     try:
         with open(DICT_PATH, "r", encoding="utf-8") as f:
             lines = [line.strip() for line in f if line.strip() and not line.startswith("#")]
             words_str = ", ".join(lines)
-            return "Привет! Это профессиональная диктовка текста с терминами и англицизмами: " + words_str
+            full_prompt = "Привет! Диктовка: " + words_str
+            # Slicing prompt to 240 chars max to prevent Whisper token overflow crash
+            return full_prompt[:240]
     except Exception as e:
         print("Error reading dictionary file:", e)
-        return "Привет! Это профессиональная диктовка текста на русском языке."
+        return default_text[:240]
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -181,6 +186,7 @@ class AudioRecorder:
 
 class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
+    error_signal = pyqtSignal(str)
     
     def __init__(self, audio_file, model_size="small"):
         super().__init__()
@@ -188,22 +194,25 @@ class TranscribeThread(QThread):
         self.model_size = model_size
 
     def run(self):
-        model = get_whisper_model(self.model_size)
-        prompt = load_custom_dictionary()
-        # Fast decoding parameters for maximum throughput
-        segments, info = model.transcribe(
-            self.audio_file, 
-            beam_size=1, 
-            best_of=1,
-            temperature=0.0,
-            condition_on_previous_text=False,
-            language="ru", 
-            initial_prompt=prompt,
-            vad_filter=True, 
-            vad_parameters=dict(min_silence_duration_ms=400)
-        )
-        text = " ".join([segment.text for segment in segments]).strip()
-        self.finished_signal.emit(text)
+        try:
+            model = get_whisper_model(self.model_size)
+            prompt = load_custom_dictionary()
+            segments, info = model.transcribe(
+                self.audio_file, 
+                beam_size=1, 
+                best_of=1,
+                temperature=0.0,
+                condition_on_previous_text=False,
+                language="ru", 
+                initial_prompt=prompt,
+                vad_filter=True, 
+                vad_parameters=dict(min_silence_duration_ms=400)
+            )
+            text = " ".join([segment.text for segment in segments]).strip()
+            self.finished_signal.emit(text)
+        except Exception as e:
+            print("Transcription thread error:", e)
+            self.error_signal.emit(str(e))
 
 class DictationWidget(QWidget):
     toggle_signal = pyqtSignal()
@@ -591,9 +600,25 @@ class DictationWidget(QWidget):
             model_choice = "small" if idx == 0 else ("medium" if idx == 1 else "large-v3")
             self.thread = TranscribeThread(self.audio_file, model_size=model_choice)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
+            self.thread.error_signal.connect(self.on_transcribe_error)
             self.thread.start()
         else:
             self.reset_btn()
+
+    def on_transcribe_error(self, err):
+        self.is_transcribing = False
+        print("Transcription Error caught gracefully:", err)
+        self.status_btn.setText("⚠️ Ошибка")
+        self.status_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f38ba8;
+                color: #11111b;
+                border: 1px solid #f38ba8;
+                border-radius: 15px;
+                padding: 0px 14px;
+            }
+        """)
+        QTimer.singleShot(2000, self.reset_btn)
 
     def on_transcribe_finished(self, text):
         self.is_transcribing = False
