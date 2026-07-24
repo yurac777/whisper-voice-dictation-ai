@@ -1,0 +1,13 @@
+.venv/
+.whisper_env/
+__pycache__/
+*.pyc
+*.wav
+*.lock
+*.log
+.env
+.env.local
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
