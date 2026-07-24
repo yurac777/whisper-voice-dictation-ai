@@ -63,8 +63,10 @@ def convert_current_selection_layout():
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading faster-whisper '{size}' INT8 model for AMD Ryzen AI...")
-        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
+        print(f"Loading faster-whisper model '{size}' (INT8 optimized for 10-core CPU)...")
+        # Handle 'large-v3-turbo' model alias
+        model_name = "large-v3" if size == "large-v3" else size
+        MODELS[size] = WhisperModel(model_name, device="cpu", compute_type="int8", cpu_threads=10)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -203,12 +205,11 @@ class DictationWidget(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # Transparent outer container without DWM halo shadow artifact
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # Single Clean Dark Glassmorphic Pill Bar
+        # Clean Dark Glassmorphic Pill Bar
         self.pill_bar = QWidget(self)
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
@@ -311,7 +312,7 @@ class DictationWidget(QWidget):
 
         # 5. Model Selector Combo
         self.model_combo = QComboBox()
-        self.model_combo.addItems(["Быстрый (small)", "Точный (medium)", "🚀 Макс (large-v3)"])
+        self.model_combo.addItems(["Быстрый (small)", "Точный (medium)", "🚀 Large-v3"])
         self.model_combo.setFixedHeight(30)
         self.model_combo.setMinimumWidth(160)
         self.model_combo.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
