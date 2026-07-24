@@ -10,7 +10,7 @@ import keyboard
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
                              QVBoxLayout, QLabel, QListWidget, QComboBox,
-                             QSystemTrayIcon, QMenu)
+                             QSystemTrayIcon, QMenu, QWidgetAction)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 
 from faster_whisper import WhisperModel
@@ -62,7 +62,7 @@ def convert_current_selection_layout():
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading Western OpenAI Whisper model '{size}' (INT8 optimized for 10-core CPU)...")
+        print(f"Loading Western OpenAI Whisper model '{size}'...")
         MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
@@ -166,7 +166,6 @@ class TranscribeThread(QThread):
     def run(self):
         try:
             model = get_whisper_model(self.model_size)
-            # Pure clean transcribe call with zero initial_prompt parameters
             segments, info = model.transcribe(
                 self.audio_file, 
                 beam_size=1, 
@@ -195,6 +194,8 @@ class DictationWidget(QWidget):
         self.target_hwnd = None
         self.history = []
         self.thread = None
+        self.autopaste_enabled = True
+        self.current_model = "small"
         self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
         
         self.toggle_signal.connect(self.toggle_recording)
@@ -214,32 +215,32 @@ class DictationWidget(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # Clean Dark Glassmorphic Pill Bar
+        # Ultra-Minimalist Glassmorphic Pill Bar
         self.pill_bar = QWidget(self)
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
             QWidget#PillBar {
                 background-color: #1e1e2e;
                 border: 1px solid #313244;
-                border-radius: 20px;
+                border-radius: 19px;
             }
         """)
 
         pill_layout = QHBoxLayout(self.pill_bar)
-        pill_layout.setContentsMargins(12, 6, 12, 6)
-        pill_layout.setSpacing(8)
+        pill_layout.setContentsMargins(8, 4, 8, 4)
+        pill_layout.setSpacing(6)
 
-        # 1. Record Pill Button
+        # 1. Main Status & Record Button
         self.status_btn = QPushButton("🔴 Запись (Колесико)")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.status_btn.setFixedHeight(30)
-        self.status_btn.setMinimumWidth(165)
+        self.status_btn.setMinimumWidth(180)
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #89b4fa;
                 border: 1px solid #89b4fa;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
             QPushButton:hover {
@@ -250,124 +251,32 @@ class DictationWidget(QWidget):
         self.status_btn.clicked.connect(self.toggle_recording)
         pill_layout.addWidget(self.status_btn)
 
-        # 2. Layout Switcher Button
-        self.layout_btn = QPushButton("🌐 EN ↔ RU (Pause)")
-        self.layout_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.layout_btn.setFixedHeight(30)
-        self.layout_btn.setMinimumWidth(150)
-        self.layout_btn.setStyleSheet("""
+        # 2. Popup Settings & Tools Button (⚙️)
+        self.menu_btn = QPushButton("⚙️")
+        self.menu_btn.setFixedSize(30, 30)
+        self.menu_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.menu_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
-                color: #fab387;
-                border: 1px solid #fab387;
-                border-radius: 15px;
-                padding: 0px 14px;
-            }
-            QPushButton:hover {
-                background-color: #fab387;
-                color: #11111b;
-            }
-        """)
-        self.layout_btn.setToolTip("Выделите текст и нажмите Pause для смены раскладки (EN <-> RU)")
-        self.layout_btn.clicked.connect(convert_current_selection_layout)
-        pill_layout.addWidget(self.layout_btn)
-
-        # 3. Auto-Paste Toggle Button
-        self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
-        self.autopaste_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.autopaste_btn.setFixedHeight(30)
-        self.autopaste_btn.setMinimumWidth(125)
-        self.autopaste_enabled = True
-        self.autopaste_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2b3d;
-                color: #a6e3a1;
-                border: 1px solid #a6e3a1;
-                border-radius: 15px;
-                padding: 0px 12px;
-            }
-            QPushButton:hover {
-                background-color: #a6e3a1;
-                color: #11111b;
-            }
-        """)
-        self.autopaste_btn.clicked.connect(self.toggle_autopaste)
-        pill_layout.addWidget(self.autopaste_btn)
-
-        # 4. History Button
-        self.history_btn = QPushButton("📜 История")
-        self.history_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.history_btn.setFixedHeight(30)
-        self.history_btn.setMinimumWidth(110)
-        self.history_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2b3d;
-                color: #cba6f7;
-                border: 1px solid #cba6f7;
-                border-radius: 15px;
-                padding: 0px 12px;
-            }
-            QPushButton:hover {
-                background-color: #cba6f7;
-                color: #11111b;
-            }
-        """)
-        self.history_btn.clicked.connect(self.toggle_history_drawer)
-        pill_layout.addWidget(self.history_btn)
-
-        # 5. Model Selector Combo
-        self.model_combo = QComboBox()
-        self.model_combo.addItems(["⚡ Быстрый (small)", "🎯 Точный (medium)", "🚀 Макс (large-v3)"])
-        self.model_combo.setFixedHeight(30)
-        self.model_combo.setMinimumWidth(160)
-        self.model_combo.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.model_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #2a2b3d;
-                color: #89dceb;
-                border: 1px solid #89dceb;
-                border-radius: 15px;
-                padding: 0px 10px;
-            }
-            QComboBox::drop-down {
-                border: none;
-                width: 20px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #1e1e2e;
                 color: #cdd6f4;
-                selection-background-color: #45475a;
-                border: 1px solid #89dceb;
-            }
-        """)
-        pill_layout.addWidget(self.model_combo)
-
-        # 6. Cancel Button
-        self.cancel_btn = QPushButton("❌ Отмена")
-        self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
-        self.cancel_btn.setFixedHeight(30)
-        self.cancel_btn.setMinimumWidth(105)
-        self.cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2b3d;
-                color: #f38ba8;
-                border: 1px solid #f38ba8;
-                border-radius: 15px;
-                padding: 0px 10px;
+                border: 1px solid #45475a;
+                border-radius: 14px;
+                padding: 0px;
             }
             QPushButton:hover {
-                background-color: #f38ba8;
-                color: #11111b;
+                background-color: #45475a;
+                color: #ffffff;
             }
         """)
-        self.cancel_btn.clicked.connect(self.cancel_dictation)
-        pill_layout.addWidget(self.cancel_btn)
+        self.menu_btn.setToolTip("Настройки и дополнительный инструмент")
+        self.menu_btn.clicked.connect(self.show_tools_menu)
+        pill_layout.addWidget(self.menu_btn)
 
-        # 7. Circular Close Button (X)
-        self.close_btn = QPushButton("✕")
-        self.close_btn.setFixedSize(28, 28)
-        self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
-        self.close_btn.setStyleSheet("""
+        # 3. Cancel Button (❌)
+        self.cancel_btn = QPushButton("❌")
+        self.cancel_btn.setFixedSize(30, 30)
+        self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #f38ba8;
@@ -380,13 +289,34 @@ class DictationWidget(QWidget):
                 color: #11111b;
             }
         """)
-        self.close_btn.setToolTip("Выйти из приложения")
+        self.cancel_btn.setToolTip("Отменить текущую запись / распознавание (ESC)")
+        self.cancel_btn.clicked.connect(self.cancel_dictation)
+        pill_layout.addWidget(self.cancel_btn)
+
+        # 4. Circular Close Button (✕)
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setFixedSize(30, 30)
+        self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        self.close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2b3d;
+                color: #a6adc8;
+                border: 1px solid #45475a;
+                border-radius: 14px;
+                padding: 0px;
+            }
+            QPushButton:hover {
+                background-color: #f38ba8;
+                color: #11111b;
+            }
+        """)
+        self.close_btn.setToolTip("Закрыть программу")
         self.close_btn.clicked.connect(QApplication.quit)
         pill_layout.addWidget(self.close_btn)
 
         outer_layout.addWidget(self.pill_bar)
 
-        # History Drawer Widget
+        # Hidden History Drawer Widget
         self.history_drawer = QWidget()
         self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
@@ -426,8 +356,67 @@ class DictationWidget(QWidget):
         outer_layout.addWidget(self.history_drawer)
 
         screen = QApplication.primaryScreen().geometry()
-        self.setFixedWidth(870)
-        self.move((screen.width() - 870) // 2, 35)
+        self.setFixedWidth(320)
+        self.move((screen.width() - 320) // 2, 30)
+
+    def show_tools_menu(self):
+        menu = QMenu(self)
+        menu.setStyleSheet("""
+            QMenu {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+                border: 1px solid #45475a;
+                border-radius: 8px;
+                padding: 6px;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+                border-radius: 4px;
+            }
+            QMenu::item:selected {
+                background-color: #45475a;
+                color: #ffffff;
+            }
+        """)
+
+        # Action 1: Layout Convert
+        act_layout = QAction("🌐 EN ↔ RU Раскладка (Pause)", self)
+        act_layout.triggered.connect(convert_current_selection_layout)
+        menu.addAction(act_layout)
+
+        # Action 2: Toggle Autopaste
+        paste_mode_str = "⚡ Вставка в окно: ВКЛ" if self.autopaste_enabled else "📋 Режим: В буфер"
+        act_paste = QAction(paste_mode_str, self)
+        act_paste.triggered.connect(self.toggle_autopaste)
+        menu.addAction(act_paste)
+
+        # Action 3: History Drawer
+        act_hist = QAction("📜 Показать Историю", self)
+        act_hist.triggered.connect(self.toggle_history_drawer)
+        menu.addAction(act_hist)
+
+        menu.addSeparator()
+
+        # Action 4: Select Small Model
+        act_m1 = QAction("⚡ Модель: Быстрая (small)" + (" (✓)" if self.current_model == "small" else ""), self)
+        act_m1.triggered.connect(lambda: self.set_model("small"))
+        menu.addAction(act_m1)
+
+        # Action 5: Select Medium Model
+        act_m2 = QAction("🎯 Модель: Точная (medium)" + (" (✓)" if self.current_model == "medium" else ""), self)
+        act_m2.triggered.connect(lambda: self.set_model("medium"))
+        menu.addAction(act_m2)
+
+        # Action 6: Select Large Model
+        act_m3 = QAction("🚀 Модель: Макс (large-v3)" + (" (✓)" if self.current_model == "large-v3" else ""), self)
+        act_m3.triggered.connect(lambda: self.set_model("large-v3"))
+        menu.addAction(act_m3)
+
+        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
+
+    def set_model(self, model_name):
+        self.current_model = model_name
+        print("Selected model:", model_name)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -457,36 +446,7 @@ class DictationWidget(QWidget):
 
     def toggle_autopaste(self):
         self.autopaste_enabled = not self.autopaste_enabled
-        if self.autopaste_enabled:
-            self.autopaste_btn.setText("⚡ В окно: ВКЛ")
-            self.autopaste_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a2b3d;
-                    color: #a6e3a1;
-                    border: 1px solid #a6e3a1;
-                    border-radius: 15px;
-                    padding: 0px 12px;
-                }
-                QPushButton:hover {
-                    background-color: #a6e3a1;
-                    color: #11111b;
-                }
-            """)
-        else:
-            self.autopaste_btn.setText("📋 В буфер: ВКЛ")
-            self.autopaste_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #2a2b3d;
-                    color: #f9e2af;
-                    border: 1px solid #f9e2af;
-                    border-radius: 15px;
-                    padding: 0px 12px;
-                }
-                QPushButton:hover {
-                    background-color: #f9e2af;
-                    color: #11111b;
-                }
-            """)
+        print("Autopaste enabled:", self.autopaste_enabled)
 
     def init_listeners(self):
         def on_click(x, y, button, pressed):
@@ -511,13 +471,13 @@ class DictationWidget(QWidget):
 
     def start_dictation(self):
         self.is_recording = True
-        self.status_btn.setText("🔴 Идет запись...")
+        self.status_btn.setText("🔴 Запись...")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
         """)
@@ -543,7 +503,7 @@ class DictationWidget(QWidget):
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
         """)
@@ -552,22 +512,20 @@ class DictationWidget(QWidget):
     def stop_dictation(self):
         self.is_recording = False
         self.is_transcribing = True
-        self.status_btn.setText("⚡ Распознавание ИИ...")
+        self.status_btn.setText("⚡ Распознавание...")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f9e2af;
                 color: #11111b;
                 border: 1px solid #f9e2af;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
         """)
         
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
-            idx = self.model_combo.currentIndex()
-            model_choice = "small" if idx == 0 else ("medium" if idx == 1 else "large-v3")
-            self.thread = TranscribeThread(self.audio_file, model_size=model_choice)
+            self.thread = TranscribeThread(self.audio_file, model_size=self.current_model)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
             self.thread.error_signal.connect(self.on_transcribe_error)
             self.thread.start()
@@ -583,7 +541,7 @@ class DictationWidget(QWidget):
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
         """)
@@ -600,16 +558,16 @@ class DictationWidget(QWidget):
             
             if self.autopaste_enabled:
                 paste_text_to_window(self.target_hwnd, text)
-                self.status_btn.setText("🟢 Вставлено в окно!")
+                self.status_btn.setText("🟢 Вставлено!")
             else:
-                self.status_btn.setText("📋 В буфере обмена!")
+                self.status_btn.setText("📋 В буфере!")
 
             self.status_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #a6e3a1;
                     color: #11111b;
                     border: 1px solid #a6e3a1;
-                    border-radius: 15px;
+                    border-radius: 14px;
                     padding: 0px 14px;
                 }
             """)
@@ -626,7 +584,7 @@ class DictationWidget(QWidget):
                 background-color: #2a2b3d;
                 color: #89b4fa;
                 border: 1px solid #89b4fa;
-                border-radius: 15px;
+                border-radius: 14px;
                 padding: 0px 14px;
             }
             QPushButton:hover {
@@ -638,8 +596,10 @@ class DictationWidget(QWidget):
     def toggle_history_drawer(self):
         if self.history_drawer.isVisible():
             self.history_drawer.hide()
+            self.setFixedWidth(320)
             self.adjustSize()
         else:
+            self.setFixedWidth(500)
             self.history_drawer.show()
             self.adjustSize()
 
