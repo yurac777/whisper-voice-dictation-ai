@@ -186,7 +186,7 @@ class DictationWidget(QWidget):
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 160))
-        shadow.setOffsetY(6)
+        shadow.setYOffset(4)
         self.pill_bar.setGraphicsEffect(shadow)
 
         pill_layout = QHBoxLayout(self.pill_bar)
