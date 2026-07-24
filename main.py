@@ -9,7 +9,7 @@ import keyboard
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
-                             QVBoxLayout, QLabel, QListWidget, QCheckBox, QComboBox,
+                             QVBoxLayout, QLabel, QListWidget, QComboBox,
                              QSystemTrayIcon, QMenu, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 
@@ -203,35 +203,37 @@ class DictationWidget(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
+        # Transparent outer container without borders
         outer_layout = QVBoxLayout(self)
-        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setContentsMargins(6, 6, 6, 6)
         outer_layout.setSpacing(0)
 
-        # High-end Master Floating Pill Bar
+        # Single Clean Floating Pill Bar
         self.pill_bar = QWidget()
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
             QWidget#PillBar {
-                background-color: rgba(20, 20, 32, 0.96);
-                border: 1px solid rgba(137, 180, 250, 0.5);
-                border-radius: 21px;
+                background-color: #1e1e2e;
+                border: 1px solid #45475a;
+                border-radius: 20px;
             }
         """)
 
         shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(24)
-        shadow.setColor(QColor(0, 0, 0, 180))
-        shadow.setYOffset(5)
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setYOffset(4)
         self.pill_bar.setGraphicsEffect(shadow)
 
         pill_layout = QHBoxLayout(self.pill_bar)
         pill_layout.setContentsMargins(12, 6, 12, 6)
         pill_layout.setSpacing(8)
 
-        # 1. Record Pill Button (Blue/Red)
-        self.status_btn = QPushButton("🎙️ Колесико: Запись")
+        # 1. Record Pill Button (Blue / Red)
+        self.status_btn = QPushButton("🔴 Запись (Колесико)")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.status_btn.setFixedHeight(30)
+        self.status_btn.setMinimumWidth(165)
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
@@ -248,17 +250,18 @@ class DictationWidget(QWidget):
         self.status_btn.clicked.connect(self.toggle_recording)
         pill_layout.addWidget(self.status_btn)
 
-        # 2. Layout Switcher Button (Peach/Orange)
-        self.layout_btn = QPushButton("🔤 Раскладка (Pause)")
-        self.layout_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        # 2. Layout Switcher Button (Peach)
+        self.layout_btn = QPushButton("🌐 EN ↔ RU (Pause)")
+        self.layout_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.layout_btn.setFixedHeight(30)
+        self.layout_btn.setMinimumWidth(145)
         self.layout_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
                 color: #fab387;
                 border: 1px solid #fab387;
                 border-radius: 15px;
-                padding: 0px 12px;
+                padding: 0px 14px;
             }
             QPushButton:hover {
                 background-color: #fab387;
@@ -269,10 +272,11 @@ class DictationWidget(QWidget):
         self.layout_btn.clicked.connect(convert_current_selection_layout)
         pill_layout.addWidget(self.layout_btn)
 
-        # 3. Auto-Paste Toggle Button (Green/Yellow)
+        # 3. Auto-Paste Toggle Button (Green / Yellow)
         self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
-        self.autopaste_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.autopaste_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.autopaste_btn.setFixedHeight(30)
+        self.autopaste_btn.setMinimumWidth(125)
         self.autopaste_enabled = True
         self.autopaste_btn.setStyleSheet("""
             QPushButton {
@@ -291,9 +295,10 @@ class DictationWidget(QWidget):
         pill_layout.addWidget(self.autopaste_btn)
 
         # 4. History Button (Purple)
-        self.history_btn = QPushButton("📋 История")
-        self.history_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.history_btn = QPushButton("📜 История")
+        self.history_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.history_btn.setFixedHeight(30)
+        self.history_btn.setMinimumWidth(110)
         self.history_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
@@ -314,7 +319,8 @@ class DictationWidget(QWidget):
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Быстрый (small)", "Точный (medium)"])
         self.model_combo.setFixedHeight(30)
-        self.model_combo.setFont(QFont("Segoe UI", 8))
+        self.model_combo.setMinimumWidth(145)
+        self.model_combo.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.model_combo.setStyleSheet("""
             QComboBox {
                 background-color: #2a2b3d;
@@ -325,7 +331,7 @@ class DictationWidget(QWidget):
             }
             QComboBox::drop-down {
                 border: none;
-                width: 15px;
+                width: 20px;
             }
             QComboBox QAbstractItemView {
                 background-color: #1e1e2e;
@@ -336,10 +342,11 @@ class DictationWidget(QWidget):
         """)
         pill_layout.addWidget(self.model_combo)
 
-        # 6. Cancel Button (Red)
+        # 6. Cancel Button (Rose)
         self.cancel_btn = QPushButton("❌ Отмена")
-        self.cancel_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.cancel_btn.setFixedHeight(30)
+        self.cancel_btn.setMinimumWidth(105)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
@@ -359,7 +366,7 @@ class DictationWidget(QWidget):
         # 7. Circular Close Button (X)
         self.close_btn = QPushButton("✕")
         self.close_btn.setFixedSize(28, 28)
-        self.close_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
         self.close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
@@ -384,7 +391,7 @@ class DictationWidget(QWidget):
         self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
             QWidget#HistoryDrawer {
-                background-color: rgba(20, 20, 32, 0.96);
+                background-color: #181825;
                 border: 1px solid #45475a;
                 border-radius: 14px;
                 margin-top: 6px;
@@ -393,7 +400,7 @@ class DictationWidget(QWidget):
         drawer_layout = QVBoxLayout(self.history_drawer)
         drawer_layout.setContentsMargins(10, 10, 10, 10)
         
-        hist_title = QLabel("📋 История надиктованного текста (клик для копирования):")
+        hist_title = QLabel("📜 История надиктованного текста (клик для копирования):")
         hist_title.setStyleSheet("color: #cdd6f4; font-size: 11px; border: none; font-weight: bold;")
         drawer_layout.addWidget(hist_title)
 
@@ -419,8 +426,8 @@ class DictationWidget(QWidget):
         outer_layout.addWidget(self.history_drawer)
 
         screen = QApplication.primaryScreen().geometry()
-        self.setFixedWidth(780)
-        self.move((screen.width() - 780) // 2, 35)
+        self.setFixedWidth(870)
+        self.move((screen.width() - 870) // 2, 35)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -596,7 +603,7 @@ class DictationWidget(QWidget):
     def reset_btn(self):
         self.is_recording = False
         self.is_transcribing = False
-        self.status_btn.setText("🎙️ Колесико: Запись")
+        self.status_btn.setText("🔴 Запись (Колесико)")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #2a2b3d;
