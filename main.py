@@ -3,17 +3,16 @@ import sys, os, time, wave, threading, psutil
 import sounddevice as sd
 import numpy as np
 import pyperclip
-import win32gui, win32con, win32api
+import win32gui, win32con, win32api, win32process
 from pynput import mouse
 import keyboard
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
                              QVBoxLayout, QLabel, QListWidget, QCheckBox, QComboBox,
                              QSystemTrayIcon, QMenu, QGraphicsDropShadowEffect)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor
 
-# Kill previous instances of main.py
 def ensure_single_instance():
     lock_file = os.path.join(os.environ.get("TEMP", "."), "whisper_dictation_app.lock")
     if os.path.exists(lock_file):
@@ -57,16 +56,37 @@ def paste_text_to_window(target_hwnd, text):
         return
     try:
         pyperclip.copy(text)
-        time.sleep(0.05)
-        try:
-            win32gui.SetForegroundWindow(target_hwnd)
-        except Exception:
-            win32gui.ShowWindow(target_hwnd, win32con.SW_RESTORE)
-            win32gui.SetForegroundWindow(target_hwnd)
-        time.sleep(0.05)
+        time.sleep(0.08)
+        
+        # Robust Windows Focus Attachment
+        current_thread = win32api.GetCurrentThreadId()
+        target_thread, _ = win32process.GetWindowThreadProcessId(target_hwnd)
+        
+        if current_thread != target_thread:
+            win32process.AttachThreadInput(current_thread, target_thread, True)
 
+        try:
+            win32gui.ShowWindow(target_hwnd, win32con.SW_SHOW)
+            win32gui.SetForegroundWindow(target_hwnd)
+            win32gui.BringWindowToTop(target_hwnd)
+        except Exception:
+            pass
+            
+        if current_thread != target_thread:
+            win32process.AttachThreadInput(current_thread, target_thread, False)
+
+        time.sleep(0.1)
+
+        # Release stuck modifier keys
+        win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
+        win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+        time.sleep(0.02)
+
+        # Send Ctrl + V
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
         win32api.keybd_event(ord('V'), 0, 0, 0)
+        time.sleep(0.03)
         win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
         print("Pasted directly into target window!")
@@ -149,8 +169,10 @@ class DictationWidget(QWidget):
         super().__init__()
         self.recorder = AudioRecorder()
         self.is_recording = False
+        self.is_transcribing = False
         self.target_hwnd = None
         self.history = []
+        self.thread = None
         self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
         
         self.toggle_signal.connect(self.toggle_recording)
@@ -166,12 +188,10 @@ class DictationWidget(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        # Outer main container layout
         outer_layout = QVBoxLayout(self)
         outer_layout.setContentsMargins(10, 10, 10, 10)
         outer_layout.setSpacing(0)
 
-        # Sleek Glassmorphic Floating Pill Bar Container
         self.pill_bar = QWidget()
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
@@ -182,7 +202,6 @@ class DictationWidget(QWidget):
             }
         """)
 
-        # Drop shadow for float depth
         shadow = QGraphicsDropShadowEffect()
         shadow.setBlurRadius(20)
         shadow.setColor(QColor(0, 0, 0, 160))
@@ -193,7 +212,7 @@ class DictationWidget(QWidget):
         pill_layout.setContentsMargins(10, 5, 10, 5)
         pill_layout.setSpacing(6)
 
-        # 1. Record / Stop Pill Button
+        # Record / Stop Pill Button
         self.status_btn = QPushButton("🖱️ Колесико: Запись")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.status_btn.setFixedHeight(28)
@@ -212,7 +231,7 @@ class DictationWidget(QWidget):
         self.status_btn.clicked.connect(self.toggle_recording)
         pill_layout.addWidget(self.status_btn)
 
-        # 2. Cancel Button
+        # Cancel Button
         self.cancel_btn = QPushButton("❌ Отмена")
         self.cancel_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         self.cancel_btn.setFixedHeight(28)
@@ -232,7 +251,7 @@ class DictationWidget(QWidget):
         self.cancel_btn.clicked.connect(self.cancel_dictation)
         pill_layout.addWidget(self.cancel_btn)
 
-        # 3. Auto-Paste Toggle Button (Sleek custom styled)
+        # Auto-Paste Toggle Button
         self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
         self.autopaste_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         self.autopaste_btn.setFixedHeight(28)
@@ -253,7 +272,7 @@ class DictationWidget(QWidget):
         self.autopaste_btn.clicked.connect(self.toggle_autopaste)
         pill_layout.addWidget(self.autopaste_btn)
 
-        # 4. History Button
+        # History Button
         self.history_btn = QPushButton("📋 История")
         self.history_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
         self.history_btn.setFixedHeight(28)
@@ -273,7 +292,7 @@ class DictationWidget(QWidget):
         self.history_btn.clicked.connect(self.toggle_history_drawer)
         pill_layout.addWidget(self.history_btn)
 
-        # 5. Model Selector Combo
+        # Model Selector Combo
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Быстрый (small)", "Точный (medium)"])
         self.model_combo.setFixedHeight(28)
@@ -299,7 +318,7 @@ class DictationWidget(QWidget):
         """)
         pill_layout.addWidget(self.model_combo)
 
-        # 6. Circular Close Button (X)
+        # Circular Close Button (X)
         self.close_btn = QPushButton("✕")
         self.close_btn.setFixedSize(26, 26)
         self.close_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -322,7 +341,7 @@ class DictationWidget(QWidget):
 
         outer_layout.addWidget(self.pill_bar)
 
-        # History Drawer Widget (Hidden by default, expands nicely)
+        # History Drawer Widget
         self.history_drawer = QWidget()
         self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
@@ -361,7 +380,6 @@ class DictationWidget(QWidget):
         self.history_drawer.hide()
         outer_layout.addWidget(self.history_drawer)
 
-        # Screen Top-Center Position
         screen = QApplication.primaryScreen().geometry()
         self.setFixedWidth(610)
         self.move((screen.width() - 610) // 2, 35)
@@ -434,15 +452,15 @@ class DictationWidget(QWidget):
         self.mouse_listener.start()
 
         try:
-            keyboard.add_hotkey('esc', lambda: self.cancel_signal.emit() if self.is_recording else None)
+            keyboard.add_hotkey('esc', lambda: self.cancel_signal.emit())
         except Exception as e:
             print("ESC listener error:", e)
 
     def toggle_recording(self):
-        if not self.is_recording:
+        if not self.is_recording and not self.is_transcribing:
             self.target_hwnd = win32gui.GetForegroundWindow()
             self.start_dictation()
-        else:
+        elif self.is_recording:
             self.stop_dictation()
 
     def start_dictation(self):
@@ -460,23 +478,36 @@ class DictationWidget(QWidget):
         self.recorder.start()
 
     def cancel_dictation(self):
+        print("CANCEL DICTATION CALLED!")
+        # 1. Abort recorder if recording
         if self.is_recording:
             self.recorder.cancel()
             self.is_recording = False
-            self.status_btn.setText("🚫 Отменено")
-            self.status_btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #f38ba8;
-                    color: #11111b;
-                    border: 1px solid #f38ba8;
-                    border-radius: 14px;
-                    padding: 0px 12px;
-                }
-            """)
-            QTimer.singleShot(1200, self.reset_btn)
+        
+        # 2. Terminate transcription thread if AI transcribing
+        if self.is_transcribing and self.thread is not None:
+            try:
+                self.thread.terminate()
+                self.thread.wait(500)
+            except Exception as e:
+                print("Thread terminate exception:", e)
+            self.is_transcribing = False
+
+        self.status_btn.setText("🚫 Отменено")
+        self.status_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f38ba8;
+                color: #11111b;
+                border: 1px solid #f38ba8;
+                border-radius: 14px;
+                padding: 0px 12px;
+            }
+        """)
+        QTimer.singleShot(1200, self.reset_btn)
 
     def stop_dictation(self):
         self.is_recording = False
+        self.is_transcribing = True
         self.status_btn.setText("⚡ Распознавание ИИ...")
         self.status_btn.setStyleSheet("""
             QPushButton {
@@ -498,6 +529,7 @@ class DictationWidget(QWidget):
             self.reset_btn()
 
     def on_transcribe_finished(self, text):
+        self.is_transcribing = False
         if text:
             print("Recognized Text:", text)
             pyperclip.copy(text)
@@ -525,6 +557,8 @@ class DictationWidget(QWidget):
             self.reset_btn()
 
     def reset_btn(self):
+        self.is_recording = False
+        self.is_transcribing = False
         self.status_btn.setText("🖱️ Колесико: Запись")
         self.status_btn.setStyleSheet("""
             QPushButton {
