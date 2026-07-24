@@ -43,6 +43,30 @@ from faster_whisper import WhisperModel
 MODELS = {}
 ICON_PATH = os.path.join(os.path.dirname(__file__), "whisper_icon.ico")
 
+# Smart Initial Prompt to force Whisper to spell English tech terms and loanwords correctly
+INITIAL_PROMPT = "Привет! Это профессиональная диктовка текста на русском языке с техническими терминами и англицизмами: Whisper, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab, OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS, Android, Linux, Online, Web."
+
+# Keyboard layout converter mappings (EN <-> RU)
+EN_TO_RU = str.maketrans(
+    "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
+    "ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,"
+)
+RU_TO_EN = str.maketrans(
+    "ёйцукенгшщзхъфывапролджэячсмитьбю.ЁЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ,",
+    "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?"
+)
+
+def fix_inverted_layout(text):
+    # Detect if text looks like inverted layout (e.g. "ghbdtn")
+    ru_char_count = sum(1 for c in text if 'а' <= c <= 'я' or 'А' <= c <= 'Я')
+    en_char_count = sum(1 for c in text if 'a' <= c <= 'z' or 'A' <= c <= 'Z')
+    
+    if en_char_count > ru_char_count and en_char_count > 3:
+        # Might be inverted Russian typed in English layout
+        converted = text.translate(EN_TO_RU)
+        return converted
+    return text
+
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
@@ -58,7 +82,6 @@ def paste_text_to_window(target_hwnd, text):
         pyperclip.copy(text)
         time.sleep(0.08)
         
-        # Robust Windows Focus Attachment
         current_thread = win32api.GetCurrentThreadId()
         target_thread, _ = win32process.GetWindowThreadProcessId(target_hwnd)
         
@@ -77,13 +100,11 @@ def paste_text_to_window(target_hwnd, text):
 
         time.sleep(0.1)
 
-        # Release stuck modifier keys
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
         time.sleep(0.02)
 
-        # Send Ctrl + V
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
         win32api.keybd_event(ord('V'), 0, 0, 0)
         time.sleep(0.03)
@@ -155,6 +176,7 @@ class TranscribeThread(QThread):
             self.audio_file, 
             beam_size=1, 
             language="ru", 
+            initial_prompt=INITIAL_PROMPT,
             vad_filter=True, 
             vad_parameters=dict(min_silence_duration_ms=500)
         )
@@ -479,12 +501,10 @@ class DictationWidget(QWidget):
 
     def cancel_dictation(self):
         print("CANCEL DICTATION CALLED!")
-        # 1. Abort recorder if recording
         if self.is_recording:
             self.recorder.cancel()
             self.is_recording = False
         
-        # 2. Terminate transcription thread if AI transcribing
         if self.is_transcribing and self.thread is not None:
             try:
                 self.thread.terminate()
@@ -531,6 +551,8 @@ class DictationWidget(QWidget):
     def on_transcribe_finished(self, text):
         self.is_transcribing = False
         if text:
+            # Fix inverted layout if needed
+            text = fix_inverted_layout(text)
             print("Recognized Text:", text)
             pyperclip.copy(text)
             
