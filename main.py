@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, time, wave, threading
+import sys, os, time, wave, threading, psutil
 import sounddevice as sd
 import numpy as np
 import pyperclip
@@ -7,16 +7,31 @@ import win32gui, win32con, win32api
 from pynput import mouse
 import keyboard
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
                              QVBoxLayout, QLabel, QListWidget, QCheckBox, QComboBox,
-                             QSystemTrayIcon, QMenu)
-from PyQt6.QtGui import QFont, QIcon, QAction
+                             QSystemTrayIcon, QMenu, QGraphicsDropShadowEffect)
+from PyQt6.QtGui import QFont, QIcon, QAction, QColor
+
+# Kill previous instances of main.py
+def kill_old_instances():
+    current_pid = os.getpid()
+    for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+        try:
+            if proc.info['pid'] != current_pid and proc.info['cmdline']:
+                cmd = " ".join(proc.info['cmdline'])
+                if "main.py" in cmd or "whisper_dictation" in cmd:
+                    if proc.info['pid'] != current_pid:
+                        print(f"Terminating old process PID {proc.info['pid']}...")
+                        proc.kill()
+        except Exception:
+            pass
+
+kill_old_instances()
 
 from faster_whisper import WhisperModel
 
 MODELS = {}
-CURRENT_MODEL_SIZE = "small"
 ICON_PATH = os.path.join(os.path.dirname(__file__), "whisper_icon.ico")
 
 def get_whisper_model(size="small"):
@@ -141,49 +156,63 @@ class DictationWidget(QWidget):
                             Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
-        main_vbox = QVBoxLayout()
-        main_vbox.setContentsMargins(0, 0, 0, 0)
+        # Outer main container layout
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(10, 10, 10, 10)
+        outer_layout.setSpacing(0)
 
-        panel = QWidget()
-        panel.setStyleSheet("""
-            QWidget {
-                background-color: #1e1e2e;
-                border: 2px solid #89b4fa;
-                border-radius: 18px;
+        # Sleek Glassmorphic Floating Pill Bar Container
+        self.pill_bar = QWidget()
+        self.pill_bar.setObjectName("PillBar")
+        self.pill_bar.setStyleSheet("""
+            QWidget#PillBar {
+                background-color: rgba(24, 24, 37, 0.95);
+                border: 1px solid rgba(137, 180, 250, 0.4);
+                border-radius: 20px;
             }
         """)
-        panel_layout = QHBoxLayout(panel)
-        panel_layout.setContentsMargins(10, 6, 10, 6)
-        panel_layout.setSpacing(6)
 
-        # Record / Stop Button
+        # Drop shadow for float depth
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(20)
+        shadow.setColor(QColor(0, 0, 0, 160))
+        shadow.setOffsetY(6)
+        self.pill_bar.setGraphicsEffect(shadow)
+
+        pill_layout = QHBoxLayout(self.pill_bar)
+        pill_layout.setContentsMargins(10, 5, 10, 5)
+        pill_layout.setSpacing(6)
+
+        # 1. Record / Stop Pill Button
         self.status_btn = QPushButton("🖱️ Колесико: Запись")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.status_btn.setFixedHeight(28)
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
                 color: #cdd6f4;
                 border: 1px solid #89b4fa;
-                border-radius: 12px;
-                padding: 5px 10px;
+                border-radius: 14px;
+                padding: 0px 12px;
             }
             QPushButton:hover {
                 background-color: #45475a;
             }
         """)
         self.status_btn.clicked.connect(self.toggle_recording)
-        panel_layout.addWidget(self.status_btn)
+        pill_layout.addWidget(self.status_btn)
 
-        # Cancel Button
+        # 2. Cancel Button
         self.cancel_btn = QPushButton("❌ Отмена")
         self.cancel_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.cancel_btn.setFixedHeight(28)
         self.cancel_btn.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
                 color: #f38ba8;
                 border: 1px solid #f38ba8;
-                border-radius: 12px;
-                padding: 5px 8px;
+                border-radius: 14px;
+                padding: 0px 10px;
             }
             QPushButton:hover {
                 background-color: #f38ba8;
@@ -191,24 +220,40 @@ class DictationWidget(QWidget):
             }
         """)
         self.cancel_btn.clicked.connect(self.cancel_dictation)
-        panel_layout.addWidget(self.cancel_btn)
+        pill_layout.addWidget(self.cancel_btn)
 
-        # Auto-Paste Checkbox
-        self.autopaste_cb = QCheckBox("☑️ В авто-окно")
-        self.autopaste_cb.setChecked(True)
-        self.autopaste_cb.setStyleSheet("color: #a6e3a1; font-weight: bold; border: none;")
-        panel_layout.addWidget(self.autopaste_cb)
+        # 3. Auto-Paste Toggle Button (Sleek custom styled)
+        self.autopaste_btn = QPushButton("⚡ В окно: ВКЛ")
+        self.autopaste_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.autopaste_btn.setFixedHeight(28)
+        self.autopaste_enabled = True
+        self.autopaste_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #313244;
+                color: #a6e3a1;
+                border: 1px solid #a6e3a1;
+                border-radius: 14px;
+                padding: 0px 10px;
+            }
+            QPushButton:hover {
+                background-color: #a6e3a1;
+                color: #11111b;
+            }
+        """)
+        self.autopaste_btn.clicked.connect(self.toggle_autopaste)
+        pill_layout.addWidget(self.autopaste_btn)
 
-        # History Button
+        # 4. History Button
         self.history_btn = QPushButton("📋 История")
         self.history_btn.setFont(QFont("Segoe UI", 8, QFont.Weight.Bold))
+        self.history_btn.setFixedHeight(28)
         self.history_btn.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
                 color: #cba6f7;
                 border: 1px solid #cba6f7;
-                border-radius: 12px;
-                padding: 5px 8px;
+                border-radius: 14px;
+                padding: 0px 10px;
             }
             QPushButton:hover {
                 background-color: #cba6f7;
@@ -216,32 +261,45 @@ class DictationWidget(QWidget):
             }
         """)
         self.history_btn.clicked.connect(self.toggle_history_drawer)
-        panel_layout.addWidget(self.history_btn)
+        pill_layout.addWidget(self.history_btn)
 
-        # Model Combo (Small vs Medium)
+        # 5. Model Selector Combo
         self.model_combo = QComboBox()
         self.model_combo.addItems(["Быстрый (small)", "Точный (medium)"])
+        self.model_combo.setFixedHeight(28)
+        self.model_combo.setFont(QFont("Segoe UI", 8))
         self.model_combo.setStyleSheet("""
             QComboBox {
                 background-color: #313244;
                 color: #89dceb;
                 border: 1px solid #89dceb;
-                border-radius: 10px;
-                padding: 2px 6px;
+                border-radius: 14px;
+                padding: 0px 8px;
+            }
+            QComboBox::drop-down {
+                border: none;
+                width: 15px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+                selection-background-color: #45475a;
+                border: 1px solid #89dceb;
             }
         """)
-        panel_layout.addWidget(self.model_combo)
+        pill_layout.addWidget(self.model_combo)
 
-        # Close App Button (X)
-        self.close_btn = QPushButton("✖")
-        self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
+        # 6. Circular Close Button (X)
+        self.close_btn = QPushButton("✕")
+        self.close_btn.setFixedSize(26, 26)
+        self.close_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.close_btn.setStyleSheet("""
             QPushButton {
                 background-color: #313244;
                 color: #f38ba8;
                 border: 1px solid #f38ba8;
-                border-radius: 12px;
-                padding: 2px 8px;
+                border-radius: 13px;
+                padding: 0px;
             }
             QPushButton:hover {
                 background-color: #f38ba8;
@@ -250,24 +308,26 @@ class DictationWidget(QWidget):
         """)
         self.close_btn.setToolTip("Выйти из приложения")
         self.close_btn.clicked.connect(QApplication.quit)
-        panel_layout.addWidget(self.close_btn)
+        pill_layout.addWidget(self.close_btn)
 
-        main_vbox.addWidget(panel)
+        outer_layout.addWidget(self.pill_bar)
 
-        # History Drawer Widget
+        # History Drawer Widget (Hidden by default, expands nicely)
         self.history_drawer = QWidget()
+        self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
-            QWidget {
-                background-color: #181825;
+            QWidget#HistoryDrawer {
+                background-color: rgba(24, 24, 37, 0.95);
                 border: 1px solid #45475a;
-                border-radius: 10px;
+                border-radius: 14px;
+                margin-top: 6px;
             }
         """)
         drawer_layout = QVBoxLayout(self.history_drawer)
         drawer_layout.setContentsMargins(8, 8, 8, 8)
         
         hist_title = QLabel("📋 История надиктованного текста (клик для копирования):")
-        hist_title.setStyleSheet("color: #cdd6f4; font-size: 10px; border: none;")
+        hist_title.setStyleSheet("color: #cdd6f4; font-size: 11px; border: none; font-weight: bold;")
         drawer_layout.addWidget(hist_title)
 
         self.history_list = QListWidget()
@@ -276,7 +336,10 @@ class DictationWidget(QWidget):
                 background-color: #1e1e2e;
                 color: #cdd6f4;
                 border: 1px solid #313244;
-                border-radius: 6px;
+                border-radius: 8px;
+            }
+            QListWidget::item {
+                padding: 4px 6px;
             }
             QListWidget::item:hover {
                 background-color: #45475a;
@@ -286,13 +349,12 @@ class DictationWidget(QWidget):
         drawer_layout.addWidget(self.history_list)
 
         self.history_drawer.hide()
-        main_vbox.addWidget(self.history_drawer)
+        outer_layout.addWidget(self.history_drawer)
 
-        self.setLayout(main_vbox)
-        self.resize(580, 48)
-        
+        # Screen Top-Center Position
         screen = QApplication.primaryScreen().geometry()
-        self.move((screen.width() - 580) // 2, 40)
+        self.setFixedWidth(610)
+        self.move((screen.width() - 610) // 2, 35)
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -319,6 +381,39 @@ class DictationWidget(QWidget):
         else:
             self.show()
             self.activateWindow()
+
+    def toggle_autopaste(self):
+        self.autopaste_enabled = not self.autopaste_enabled
+        if self.autopaste_enabled:
+            self.autopaste_btn.setText("⚡ В окно: ВКЛ")
+            self.autopaste_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #313244;
+                    color: #a6e3a1;
+                    border: 1px solid #a6e3a1;
+                    border-radius: 14px;
+                    padding: 0px 10px;
+                }
+                QPushButton:hover {
+                    background-color: #a6e3a1;
+                    color: #11111b;
+                }
+            """)
+        else:
+            self.autopaste_btn.setText("📋 В буфер: ВКЛ")
+            self.autopaste_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #313244;
+                    color: #f9e2af;
+                    border: 1px solid #f9e2af;
+                    border-radius: 14px;
+                    padding: 0px 10px;
+                }
+                QPushButton:hover {
+                    background-color: #f9e2af;
+                    color: #11111b;
+                }
+            """)
 
     def init_listeners(self):
         def on_click(x, y, button, pressed):
@@ -348,8 +443,8 @@ class DictationWidget(QWidget):
                 background-color: #f38ba8;
                 color: #11111b;
                 border: 1px solid #f38ba8;
-                border-radius: 12px;
-                padding: 5px 10px;
+                border-radius: 14px;
+                padding: 0px 12px;
             }
         """)
         self.recorder.start()
@@ -364,8 +459,8 @@ class DictationWidget(QWidget):
                     background-color: #f38ba8;
                     color: #11111b;
                     border: 1px solid #f38ba8;
-                    border-radius: 12px;
-                    padding: 5px 10px;
+                    border-radius: 14px;
+                    padding: 0px 12px;
                 }
             """)
             QTimer.singleShot(1200, self.reset_btn)
@@ -378,8 +473,8 @@ class DictationWidget(QWidget):
                 background-color: #f9e2af;
                 color: #11111b;
                 border: 1px solid #f9e2af;
-                border-radius: 12px;
-                padding: 5px 10px;
+                border-radius: 14px;
+                padding: 0px 12px;
             }
         """)
         
@@ -400,7 +495,7 @@ class DictationWidget(QWidget):
             self.history.insert(0, text)
             self.history_list.insertItem(0, text)
             
-            if self.autopaste_cb.isChecked():
+            if self.autopaste_enabled:
                 paste_text_to_window(self.target_hwnd, text)
                 self.status_btn.setText("🟢 Вставлено в окно!")
             else:
@@ -411,8 +506,8 @@ class DictationWidget(QWidget):
                     background-color: #a6e3a1;
                     color: #11111b;
                     border: 1px solid #a6e3a1;
-                    border-radius: 12px;
-                    padding: 5px 10px;
+                    border-radius: 14px;
+                    padding: 0px 12px;
                 }
             """)
             QTimer.singleShot(1500, self.reset_btn)
@@ -426,8 +521,8 @@ class DictationWidget(QWidget):
                 background-color: #313244;
                 color: #cdd6f4;
                 border: 1px solid #89b4fa;
-                border-radius: 12px;
-                padding: 5px 10px;
+                border-radius: 14px;
+                padding: 0px 12px;
             }
             QPushButton:hover {
                 background-color: #45475a;
@@ -437,10 +532,10 @@ class DictationWidget(QWidget):
     def toggle_history_drawer(self):
         if self.history_drawer.isVisible():
             self.history_drawer.hide()
-            self.resize(580, 48)
+            self.adjustSize()
         else:
             self.history_drawer.show()
-            self.resize(580, 200)
+            self.adjustSize()
 
     def copy_history_item(self, item):
         pyperclip.copy(item.text())
