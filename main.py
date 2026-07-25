@@ -31,7 +31,10 @@ DEFAULT_CONFIG = {
     "realtime_mode": False,
     "autopaste": True,
     "model_size": "small",
-    "language": "ru"
+    "language": "ru",
+    "max_duration_sec": 60,
+    "min_duration_sec": 0.4,
+    "silence_rms_threshold": 0.008
 }
 
 LANGUAGES = [
@@ -176,6 +179,7 @@ class AudioRecorder:
         self.recording = False
         self.audio_data = []
         self.record_thread = None
+        self.start_time = 0
 
     def _record_loop(self):
         try:
@@ -189,9 +193,18 @@ class AudioRecorder:
 
     def start(self):
         self.audio_data = []
+        self.start_time = time.time()
         self.recording = True
         self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
         self.record_thread.start()
+
+    def get_stats(self):
+        if not self.audio_data:
+            return 0.0, 0.0
+        data = np.concatenate(self.audio_data, axis=0)
+        duration = len(data) / float(self.sample_rate)
+        max_rms = float(np.sqrt(np.mean(data**2)))
+        return duration, max_rms
 
     def get_current_audio_file(self, out_filename):
         if not self.audio_data:
@@ -381,6 +394,11 @@ class DictationWidget(QWidget):
         self.stream_timer = QTimer(self)
         self.stream_timer.setInterval(2500)
         self.stream_timer.timeout.connect(self.process_realtime_chunk)
+
+        # Max recording duration timer (Safety limit: 60 sec)
+        self.max_recording_timer = QTimer(self)
+        self.max_recording_timer.setSingleShot(True)
+        self.max_recording_timer.timeout.connect(self.auto_stop_max_duration)
         
         self.init_ui()
         self.init_tray()
@@ -652,8 +670,17 @@ class DictationWidget(QWidget):
         """)
         self.recorder.start()
 
+        # Start max duration 60s timeout timer
+        max_sec = self.cfg.get("max_duration_sec", 60)
+        self.max_recording_timer.start(max_sec * 1000)
+
         if self.cfg.get("realtime_mode", False):
             self.stream_timer.start()
+
+    def auto_stop_max_duration(self):
+        if self.is_recording:
+            print("Max recording duration reached (60s). Auto-stopping...")
+            self.stop_dictation()
 
     def process_realtime_chunk(self):
         if self.is_recording and not self.is_transcribing:
@@ -672,6 +699,7 @@ class DictationWidget(QWidget):
 
     def cancel_dictation(self):
         self.stream_timer.stop()
+        self.max_recording_timer.stop()
         if self.is_recording:
             self.recorder.cancel()
             self.is_recording = False
@@ -698,7 +726,30 @@ class DictationWidget(QWidget):
 
     def stop_dictation(self):
         self.stream_timer.stop()
+        self.max_recording_timer.stop()
         self.is_recording = False
+
+        # Edge-case Check 1: Check audio duration and silence RMS volume
+        duration, max_rms = self.recorder.get_stats()
+        min_dur = self.cfg.get("min_duration_sec", 0.4)
+        min_rms = self.cfg.get("silence_rms_threshold", 0.008)
+
+        # Accidental click check (< 0.4s)
+        if duration < min_dur:
+            print(f"Accidental click detected ({duration:.2f}s < {min_dur}s). Cancelling...")
+            self.recorder.cancel()
+            self.status_btn.setText("⚡ Слишком коротко")
+            QTimer.singleShot(1000, self.reset_btn)
+            return
+
+        # Pure silence check (No voice detected)
+        if max_rms < min_rms:
+            print(f"Pure silence detected (RMS {max_rms:.4f} < {min_rms}). Cancelling...")
+            self.recorder.cancel()
+            self.status_btn.setText("🔇 Тишина")
+            QTimer.singleShot(1000, self.reset_btn)
+            return
+
         self.is_transcribing = True
         self.tray_icon.setIcon(self.proc_icon)
         self.status_btn.setText("⚡ ИИ-обработка...")
