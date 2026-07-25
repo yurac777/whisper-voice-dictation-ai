@@ -33,8 +33,8 @@ DEFAULT_CONFIG = {
     "model_size": "small",
     "language": "ru",
     "max_duration_sec": 60,
-    "min_duration_sec": 0.4,
-    "silence_rms_threshold": 0.008
+    "min_duration_sec": 0.2,
+    "silence_rms_threshold": 0.0001
 }
 
 LANGUAGES = [
@@ -353,7 +353,7 @@ class SettingsDialog(QDialog):
         self.min_dur_spin.setRange(0.1, 2.0)
         self.min_dur_spin.setSingleStep(0.1)
         self.min_dur_spin.setSuffix(" сек")
-        self.min_dur_spin.setValue(self.cfg.get("min_duration_sec", 0.4))
+        self.min_dur_spin.setValue(self.cfg.get("min_duration_sec", 0.2))
         form.addRow("⚡ Защита от коротких кликов:", self.min_dur_spin)
 
         # Real-time streaming checkbox
@@ -745,20 +745,13 @@ class DictationWidget(QWidget):
         self.is_recording = False
 
         duration, max_rms = self.recorder.get_stats()
-        min_dur = self.cfg.get("min_duration_sec", 0.4)
-        min_rms = self.cfg.get("silence_rms_threshold", 0.008)
+        min_dur = self.cfg.get("min_duration_sec", 0.2)
 
+        # Accidental short click check (< 0.2s)
         if duration < min_dur:
             print(f"Accidental click detected ({duration:.2f}s < {min_dur}s). Cancelling...")
             self.recorder.cancel()
             self.status_btn.setText("⚡ Слишком коротко")
-            QTimer.singleShot(1000, self.reset_btn)
-            return
-
-        if max_rms < min_rms:
-            print(f"Pure silence detected (RMS {max_rms:.4f} < {min_rms}). Cancelling...")
-            self.recorder.cancel()
-            self.status_btn.setText("🔇 Тишина")
             QTimer.singleShot(1000, self.reset_btn)
             return
 
