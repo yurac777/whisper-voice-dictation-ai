@@ -233,6 +233,21 @@ class AudioRecorder:
         if self.record_thread and self.record_thread.is_alive():
             self.record_thread.join(timeout=0.5)
 
+class ModelPreloaderThread(QThread):
+    finished_signal = pyqtSignal(str, bool)
+    
+    def __init__(self, model_size):
+        super().__init__()
+        self.model_size = model_size
+
+    def run(self):
+        try:
+            get_whisper_model(self.model_size)
+            self.finished_signal.emit(self.model_size, True)
+        except Exception as e:
+            print("Model preload error:", e)
+            self.finished_signal.emit(self.model_size, False)
+
 class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
@@ -267,6 +282,7 @@ class SettingsDialog(QDialog):
     def __init__(self, parent_widget, cfg):
         super().__init__(parent_widget)
         self.cfg = cfg
+        self.parent_widget = parent_widget
         self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
         self.setFixedWidth(450)
         self.setStyleSheet("""
@@ -331,7 +347,7 @@ class SettingsDialog(QDialog):
         if idx_p >= 0: self.pos_combo.setCurrentIndex(idx_p)
         form.addRow("📍 Размещение виджета:", self.pos_combo)
 
-        # Model Selector
+        # Model Selector with Automatic Warmup Indicator
         self.model_combo = QComboBox()
         self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
@@ -341,6 +357,11 @@ class SettingsDialog(QDialog):
         idx_m = self.model_combo.findData(self.cfg.get("model_size", "small"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
+
+        # Model Status Label
+        self.model_status_lbl = QLabel("ℹ️ Модель подгрузится при выборе")
+        self.model_status_lbl.setStyleSheet("color: #89b4fa; font-style: italic; font-size: 11px;")
+        form.addRow("", self.model_status_lbl)
 
         # Max duration limit (seconds)
         self.max_dur_spin = QSpinBox()
@@ -374,15 +395,24 @@ class SettingsDialog(QDialog):
         layout.addWidget(save_btn)
 
     def save_and_close(self):
+        new_model = self.model_combo.currentData()
+        old_model = self.cfg.get("model_size", "small")
+
         self.cfg["language"] = self.lang_combo.currentData()
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
         self.cfg["position_mode"] = self.pos_combo.currentData()
-        self.cfg["model_size"] = self.model_combo.currentData()
+        self.cfg["model_size"] = new_model
         self.cfg["max_duration_sec"] = self.max_dur_spin.value()
         self.cfg["min_duration_sec"] = self.min_dur_spin.value()
         self.cfg["realtime_mode"] = self.realtime_chk.isChecked()
         self.cfg["autopaste"] = self.autopaste_chk.isChecked()
         save_config(self.cfg)
+
+        # Trigger background model warmup if model changed
+        if new_model != old_model or new_model not in MODELS:
+            if hasattr(self.parent_widget, 'start_model_preloader'):
+                self.parent_widget.start_model_preloader(new_model)
+
         self.accept()
 
 class DictationWidget(QWidget):
@@ -398,6 +428,7 @@ class DictationWidget(QWidget):
         self.target_hwnd = None
         self.history = []
         self.thread = None
+        self.preloader_thread = None
         
         self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
         self.realtime_file = os.path.join(os.environ.get("TEMP", "."), "dictation_realtime.wav")
@@ -425,6 +456,42 @@ class DictationWidget(QWidget):
         self.init_ui()
         self.init_tray()
         self.init_listeners()
+
+        # Warmup default configured model in background on startup
+        QTimer.singleShot(500, lambda: self.start_model_preloader(self.cfg.get("model_size", "small")))
+
+    def start_model_preloader(self, model_size):
+        if model_size in MODELS:
+            return
+        self.status_btn.setText(f"⏳ Загрузка {model_size}...")
+        self.status_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f9e2af;
+                color: #11111b;
+                border: 1px solid #f9e2af;
+                border-radius: 14px;
+                padding: 0px 14px;
+            }
+        """)
+        self.preloader_thread = ModelPreloaderThread(model_size)
+        self.preloader_thread.finished_signal.connect(self.on_model_preloaded)
+        self.preloader_thread.start()
+
+    def on_model_preloaded(self, model_size, success):
+        if success:
+            self.status_btn.setText(f"✅ {model_size.upper()} Готова!")
+            self.status_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #a6e3a1;
+                    color: #11111b;
+                    border: 1px solid #a6e3a1;
+                    border-radius: 14px;
+                    padding: 0px 14px;
+                }
+            """)
+        else:
+            self.status_btn.setText(f"⚠️ Ошибка {model_size}")
+        QTimer.singleShot(1500, self.reset_btn)
 
     def init_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | 
