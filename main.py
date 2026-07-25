@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, time, wave, threading, psutil, subprocess
+import sys, os, time, wave, threading, json, subprocess
 import sounddevice as sd
 import numpy as np
 import pyperclip
@@ -9,17 +9,46 @@ import keyboard
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPoint
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
-                             QVBoxLayout, QLabel, QListWidget, QComboBox,
-                             QSystemTrayIcon, QMenu)
+                             QVBoxLayout, QLabel, QListWidget, QComboBox, QCheckBox,
+                             QSystemTrayIcon, QMenu, QDialog, QFormLayout, QGroupBox)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor, QPixmap, QPainter, QBrush, QPen, QCursor
 
 from faster_whisper import WhisperModel
 
 MODELS = {}
-PROJ_DIR = os.path.dirname(__file__)
-ICON_PATH = os.path.join(PROJ_DIR, "whisper_icon.ico")
+APP_DIR = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__)
+CONFIG_PATH = os.path.join(APP_DIR, "config.json")
+ICON_PATH = os.path.join(APP_DIR, "whisper_icon.ico")
+LOG_PATH = os.path.join(APP_DIR, "app.log")
 
 INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
+
+DEFAULT_CONFIG = {
+    "hotkey": "middle_click",
+    "position_mode": "top_center",
+    "custom_x": -1,
+    "custom_y": -1,
+    "realtime_mode": False,
+    "autopaste": True,
+    "model_size": "small"
+}
+
+def load_config():
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+                return {**DEFAULT_CONFIG, **cfg}
+        except Exception:
+            pass
+    return DEFAULT_CONFIG.copy()
+
+def save_config(cfg):
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print("Save config error:", e)
 
 EN_TO_RU = str.maketrans(
     "`qwertzuiop[]asdfghjkl;'zxcvbnm,./~QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>?",
@@ -36,12 +65,10 @@ def create_tray_icon_pixmap(color_hex, recording=False):
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     
-    # Outer Glow Ring
     painter.setBrush(QBrush(QColor(color_hex)))
     painter.setPen(Qt.PenStyle.NoPen)
     painter.drawEllipse(2, 2, 28, 28)
     
-    # Inner Mic Dot
     if recording:
         painter.setBrush(QBrush(QColor("#ffffff")))
         painter.drawEllipse(10, 10, 12, 12)
@@ -79,15 +106,14 @@ def convert_current_selection_layout():
             time.sleep(0.03)
             win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
             win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-            print("Converted layout for selected text:", converted)
     except Exception as e:
         print("Layout conversion error:", e)
 
 def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading Western OpenAI Whisper model '{size}'...")
-        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
+        print(f"Loading OpenAI Whisper model '{size}'...")
+        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=8)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -126,7 +152,6 @@ def paste_text_to_window(target_hwnd, text):
         time.sleep(0.03)
         win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-        print("Pasted directly into target window!")
     except Exception as e:
         print("Error pasting text:", e)
 
@@ -153,27 +178,26 @@ class AudioRecorder:
         self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
         self.record_thread.start()
 
-    def stop(self, out_filename):
-        self.recording = False
-        if self.record_thread and self.record_thread.is_alive():
-            self.record_thread.join(timeout=1.0)
-        
+    def get_current_audio_file(self, out_filename):
         if not self.audio_data:
             return False
-            
         try:
             data = np.concatenate(self.audio_data, axis=0)
             data_int16 = (data * 32767).astype(np.int16)
-            
             with wave.open(out_filename, 'wb') as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(self.sample_rate)
                 wf.writeframes(data_int16.tobytes())
             return True
-        except Exception as e:
-            print("Error writing WAV file:", e)
+        except Exception:
             return False
+
+    def stop(self, out_filename):
+        self.recording = False
+        if self.record_thread and self.record_thread.is_alive():
+            self.record_thread.join(timeout=1.0)
+        return self.get_current_audio_file(out_filename)
 
     def cancel(self):
         self.recording = False
@@ -207,8 +231,103 @@ class TranscribeThread(QThread):
             text = " ".join([segment.text for segment in segments]).strip()
             self.finished_signal.emit(text)
         except Exception as e:
-            print("Transcription thread error:", e)
             self.error_signal.emit(str(e))
+
+class SettingsDialog(QDialog):
+    def __init__(self, parent_widget, cfg):
+        super().__init__(parent_widget)
+        self.cfg = cfg
+        self.setWindowTitle("⚙️ Настройки Whisper Voice AI")
+        self.setFixedWidth(400)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #1e1e2e;
+                color: #cdd6f4;
+            }
+            QLabel {
+                color: #cdd6f4;
+                font-size: 13px;
+            }
+            QComboBox, QCheckBox {
+                background-color: #313244;
+                color: #cdd6f4;
+                border: 1px solid #45475a;
+                border-radius: 6px;
+                padding: 6px;
+            }
+            QPushButton {
+                background-color: #89b4fa;
+                color: #11111b;
+                font-weight: bold;
+                border-radius: 6px;
+                padding: 8px 16px;
+            }
+            QPushButton:hover {
+                background-color: #b4befe;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+
+        form = QFormLayout()
+
+        # Hotkey selector
+        self.hotkey_combo = QComboBox()
+        self.hotkey_combo.addItem("Колесико мыши (Middle Click)", "middle_click")
+        self.hotkey_combo.addItem("Правый Alt (Right Alt)", "right_alt")
+        self.hotkey_combo.addItem("Правый Ctrl (Right Ctrl)", "right_ctrl")
+        self.hotkey_combo.addItem("Клавиша F9", "f9")
+        self.hotkey_combo.addItem("Клавиша F10", "f10")
+        
+        idx = self.hotkey_combo.findData(self.cfg.get("hotkey", "middle_click"))
+        if idx >= 0: self.hotkey_combo.setCurrentIndex(idx)
+        form.addRow("⌨️ Кнопка записи:", self.hotkey_combo)
+
+        # Position Mode
+        self.pos_combo = QComboBox()
+        self.pos_combo.addItem("Верх по центру (Top Center)", "top_center")
+        self.pos_combo.addItem("Низ по центру (Bottom Center)", "bottom_center")
+        self.pos_combo.addItem("Верх справа (Top Right)", "top_right")
+        self.pos_combo.addItem("Запоминать перетаскивание (Custom)", "custom")
+        
+        idx_p = self.pos_combo.findData(self.cfg.get("position_mode", "top_center"))
+        if idx_p >= 0: self.pos_combo.setCurrentIndex(idx_p)
+        form.addRow("📍 Размещение виджета:", self.pos_combo)
+
+        # Model Selector
+        self.model_combo = QComboBox()
+        self.model_combo.addItem("⚡ Быстрая (small)", "small")
+        self.model_combo.addItem("🎯 Точная (medium)", "medium")
+        self.model_combo.addItem("🚀 Макс (large-v3)", "large-v3")
+        
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "small"))
+        if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
+        form.addRow("🤖 Модель ИИ:", self.model_combo)
+
+        # Real-time streaming checkbox
+        self.realtime_chk = QCheckBox("Печать в реальном времени (Live Streaming)")
+        self.realtime_chk.setChecked(self.cfg.get("realtime_mode", False))
+        form.addRow("⚡ Режим ввода:", self.realtime_chk)
+
+        # Autopaste checkbox
+        self.autopaste_chk = QCheckBox("Автоматическая вставка в активное окно")
+        self.autopaste_chk.setChecked(self.cfg.get("autopaste", True))
+        form.addRow("📋 Буфер / Вставка:", self.autopaste_chk)
+
+        layout.addLayout(form)
+
+        save_btn = QPushButton("💾 Сохранить настройки")
+        save_btn.clicked.connect(self.save_and_close)
+        layout.addWidget(save_btn)
+
+    def save_and_close(self):
+        self.cfg["hotkey"] = self.hotkey_combo.currentData()
+        self.cfg["position_mode"] = self.pos_combo.currentData()
+        self.cfg["model_size"] = self.model_combo.currentData()
+        self.cfg["realtime_mode"] = self.realtime_chk.isChecked()
+        self.cfg["autopaste"] = self.autopaste_chk.isChecked()
+        save_config(self.cfg)
+        self.accept()
 
 class DictationWidget(QWidget):
     toggle_signal = pyqtSignal()
@@ -216,22 +335,28 @@ class DictationWidget(QWidget):
 
     def __init__(self):
         super().__init__()
+        self.cfg = load_config()
         self.recorder = AudioRecorder()
         self.is_recording = False
         self.is_transcribing = False
         self.target_hwnd = None
         self.history = []
         self.thread = None
-        self.autopaste_enabled = True
-        self.current_model = "small"
-        self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
         
-        self.idle_icon = create_tray_icon_pixmap("#89b4fa", False)
+        self.audio_file = os.path.join(os.environ.get("TEMP", "."), "dictation_recording.wav")
+        self.realtime_file = os.path.join(os.environ.get("TEMP", "."), "dictation_realtime.wav")
+        
+        self.idle_icon = create_tray_icon_pixmap("#a6e3a1", False)
         self.rec_icon = create_tray_icon_pixmap("#f38ba8", True)
         self.proc_icon = create_tray_icon_pixmap("#f9e2af", False)
         
         self.toggle_signal.connect(self.toggle_recording)
         self.cancel_signal.connect(self.cancel_dictation)
+        
+        # Realtime Streaming Timer
+        self.stream_timer = QTimer(self)
+        self.stream_timer.setInterval(2500)
+        self.stream_timer.timeout.connect(self.process_realtime_chunk)
         
         self.init_ui()
         self.init_tray()
@@ -247,7 +372,6 @@ class DictationWidget(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # Ultra-Minimalist Glassmorphic Pill Bar
         self.pill_bar = QWidget(self)
         self.pill_bar.setObjectName("PillBar")
         self.pill_bar.setStyleSheet("""
@@ -262,24 +386,12 @@ class DictationWidget(QWidget):
         pill_layout.setContentsMargins(8, 4, 8, 4)
         pill_layout.setSpacing(6)
 
-        # 1. Main Status & Record Button
-        self.status_btn = QPushButton("🔴 Запись (Колесико)")
+        # 1. Main Status & Record Button (Green Idle Ready State)
+        self.status_btn = QPushButton("🟢 Надиктовать")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.status_btn.setFixedHeight(30)
-        self.status_btn.setMinimumWidth(180)
-        self.status_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2b3d;
-                color: #89b4fa;
-                border: 1px solid #89b4fa;
-                border-radius: 14px;
-                padding: 0px 14px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-                color: #11111b;
-            }
-        """)
+        self.status_btn.setMinimumWidth(170)
+        self.set_btn_ready_style()
         self.status_btn.clicked.connect(self.toggle_recording)
         pill_layout.addWidget(self.status_btn)
 
@@ -293,15 +405,14 @@ class DictationWidget(QWidget):
                 color: #cdd6f4;
                 border: 1px solid #45475a;
                 border-radius: 14px;
-                padding: 0px;
             }
             QPushButton:hover {
                 background-color: #45475a;
                 color: #ffffff;
             }
         """)
-        self.menu_btn.setToolTip("Настройки и инструменты")
-        self.menu_btn.clicked.connect(self.show_tools_menu)
+        self.menu_btn.setToolTip("Настройки")
+        self.menu_btn.clicked.connect(self.open_settings_dialog)
         pill_layout.addWidget(self.menu_btn)
 
         # 3. Cancel Button (❌)
@@ -314,18 +425,17 @@ class DictationWidget(QWidget):
                 color: #f38ba8;
                 border: 1px solid #f38ba8;
                 border-radius: 14px;
-                padding: 0px;
             }
             QPushButton:hover {
                 background-color: #f38ba8;
                 color: #11111b;
             }
         """)
-        self.cancel_btn.setToolTip("Отменить текущую запись / распознавание (ESC)")
+        self.cancel_btn.setToolTip("Отменить запись (ESC)")
         self.cancel_btn.clicked.connect(self.cancel_dictation)
         pill_layout.addWidget(self.cancel_btn)
 
-        # 4. Circular Close Button (✕)
+        # 4. Close Button (✕)
         self.close_btn = QPushButton("✕")
         self.close_btn.setFixedSize(30, 30)
         self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
@@ -335,20 +445,19 @@ class DictationWidget(QWidget):
                 color: #a6adc8;
                 border: 1px solid #45475a;
                 border-radius: 14px;
-                padding: 0px;
             }
             QPushButton:hover {
                 background-color: #f38ba8;
                 color: #11111b;
             }
         """)
-        self.close_btn.setToolTip("Закрыть программу")
+        self.close_btn.setToolTip("Закрыть")
         self.close_btn.clicked.connect(QApplication.quit)
         pill_layout.addWidget(self.close_btn)
 
         outer_layout.addWidget(self.pill_bar)
 
-        # Hidden History Drawer Widget
+        # History Drawer
         self.history_drawer = QWidget()
         self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
@@ -362,7 +471,7 @@ class DictationWidget(QWidget):
         drawer_layout = QVBoxLayout(self.history_drawer)
         drawer_layout.setContentsMargins(10, 10, 10, 10)
         
-        hist_title = QLabel("📜 История надиктованного текста (клик для копирования):")
+        hist_title = QLabel("📜 История надиктованного текста:")
         hist_title.setStyleSheet("color: #cdd6f4; font-size: 11px; border: none; font-weight: bold;")
         drawer_layout.addWidget(hist_title)
 
@@ -373,9 +482,6 @@ class DictationWidget(QWidget):
                 color: #cdd6f4;
                 border: 1px solid #313244;
                 border-radius: 8px;
-            }
-            QListWidget::item {
-                padding: 5px 8px;
             }
             QListWidget::item:hover {
                 background-color: #45475a;
@@ -388,76 +494,57 @@ class DictationWidget(QWidget):
         outer_layout.addWidget(self.history_drawer)
 
         self.setFixedWidth(320)
-        self.move_to_active_monitor()
+        self.reposition_window()
 
-    def move_to_active_monitor(self):
-        # Dynamic active monitor positioning based on cursor location!
+    def set_btn_ready_style(self):
+        hotkey_str = self.cfg.get("hotkey", "middle_click")
+        label = "🟢 Надиктовать"
+        if hotkey_str == "middle_click": label += " (Колесико)"
+        elif hotkey_str == "right_alt": label += " (R-Alt)"
+        elif hotkey_str == "right_ctrl": label += " (R-Ctrl)"
+        elif hotkey_str == "f9": label += " (F9)"
+        elif hotkey_str == "f10": label += " (F10)"
+        
+        self.status_btn.setText(label)
+        self.status_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1e2030;
+                color: #a6e3a1;
+                border: 1px solid #a6e3a1;
+                border-radius: 14px;
+                padding: 0px 14px;
+            }
+            QPushButton:hover {
+                background-color: #a6e3a1;
+                color: #11111b;
+            }
+        """)
+
+    def reposition_window(self):
+        mode = self.cfg.get("position_mode", "top_center")
+        if mode == "custom" and self.cfg.get("custom_x", -1) >= 0 and self.cfg.get("custom_y", -1) >= 0:
+            self.move(self.cfg["custom_x"], self.cfg["custom_y"])
+            return
+
         cursor_pos = QCursor.pos()
         screen = QApplication.screenAt(cursor_pos)
         if not screen:
             screen = QApplication.primaryScreen()
         
         geo = screen.geometry()
-        self.move((geo.x() + (geo.width() - self.width()) // 2), geo.y() + 30)
+        if mode == "bottom_center":
+            self.move((geo.x() + (geo.width() - self.width()) // 2), geo.y() + geo.height() - 80)
+        elif mode == "top_right":
+            self.move(geo.x() + geo.width() - self.width() - 40, geo.y() + 30)
+        else: # top_center
+            self.move((geo.x() + (geo.width() - self.width()) // 2), geo.y() + 30)
 
-    def show_tools_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #1e1e2e;
-                color: #cdd6f4;
-                border: 1px solid #45475a;
-                border-radius: 8px;
-                padding: 6px;
-            }
-            QMenu::item {
-                padding: 6px 20px;
-                border-radius: 4px;
-            }
-            QMenu::item:selected {
-                background-color: #45475a;
-                color: #ffffff;
-            }
-        """)
-
-        # Action 1: Layout Convert
-        act_layout = QAction("🌐 EN ↔ RU Раскладка (Pause)", self)
-        act_layout.triggered.connect(convert_current_selection_layout)
-        menu.addAction(act_layout)
-
-        # Action 2: Toggle Autopaste
-        paste_mode_str = "⚡ Вставка в окно: ВКЛ" if self.autopaste_enabled else "📋 Режим: В буфер"
-        act_paste = QAction(paste_mode_str, self)
-        act_paste.triggered.connect(self.toggle_autopaste)
-        menu.addAction(act_paste)
-
-        # Action 3: History Drawer
-        act_hist = QAction("📜 Показать Историю", self)
-        act_hist.triggered.connect(self.toggle_history_drawer)
-        menu.addAction(act_hist)
-
-        menu.addSeparator()
-
-        # Action 4: Select Small Model
-        act_m1 = QAction("⚡ Модель: Быстрая (small)" + (" (✓)" if self.current_model == "small" else ""), self)
-        act_m1.triggered.connect(lambda: self.set_model("small"))
-        menu.addAction(act_m1)
-
-        # Action 5: Select Medium Model
-        act_m2 = QAction("🎯 Модель: Точная (medium)" + (" (✓)" if self.current_model == "medium" else ""), self)
-        act_m2.triggered.connect(lambda: self.set_model("medium"))
-        menu.addAction(act_m2)
-
-        # Action 6: Select Large Model
-        act_m3 = QAction("🚀 Модель: Макс (large-v3)" + (" (✓)" if self.current_model == "large-v3" else ""), self)
-        act_m3.triggered.connect(lambda: self.set_model("large-v3"))
-        menu.addAction(act_m3)
-
-        menu.exec(self.menu_btn.mapToGlobal(self.menu_btn.rect().bottomLeft()))
-
-    def set_model(self, model_name):
-        self.current_model = model_name
-        print("Selected model:", model_name)
+    def open_settings_dialog(self):
+        dlg = SettingsDialog(self, self.cfg)
+        if dlg.exec():
+            self.set_btn_ready_style()
+            self.reposition_window()
+            self.init_listeners()
 
     def init_tray(self):
         self.tray_icon = QSystemTrayIcon(self)
@@ -472,6 +559,10 @@ class DictationWidget(QWidget):
         show_action.triggered.connect(self.toggle_visibility)
         tray_menu.addAction(show_action)
 
+        settings_action = QAction("⚙️ Настройки", self)
+        settings_action.triggered.connect(self.open_settings_dialog)
+        tray_menu.addAction(settings_action)
+
         quit_action = QAction("Выйти из Whisper Voice", self)
         quit_action.triggered.connect(QApplication.quit)
         tray_menu.addAction(quit_action)
@@ -484,25 +575,37 @@ class DictationWidget(QWidget):
         if self.isVisible():
             self.hide()
         else:
-            self.move_to_active_monitor()
+            self.reposition_window()
             self.show()
             self.activateWindow()
 
-    def toggle_autopaste(self):
-        self.autopaste_enabled = not self.autopaste_enabled
-        print("Autopaste enabled:", self.autopaste_enabled)
-
     def init_listeners(self):
+        if hasattr(self, 'mouse_listener') and self.mouse_listener:
+            try: self.mouse_listener.stop()
+            except Exception: pass
+
+        hk = self.cfg.get("hotkey", "middle_click")
+
         def on_click(x, y, button, pressed):
-            if button == mouse.Button.middle and pressed:
+            if hk == "middle_click" and button == mouse.Button.middle and pressed:
                 self.toggle_signal.emit()
 
         self.mouse_listener = mouse.Listener(on_click=on_click)
         self.mouse_listener.start()
 
         try:
+            keyboard.unhook_all()
             keyboard.add_hotkey('esc', lambda: self.cancel_signal.emit())
             keyboard.add_hotkey('pause', lambda: convert_current_selection_layout())
+
+            if hk == "right_alt":
+                keyboard.add_hotkey('right alt', lambda: self.toggle_signal.emit())
+            elif hk == "right_ctrl":
+                keyboard.add_hotkey('right ctrl', lambda: self.toggle_signal.emit())
+            elif hk == "f9":
+                keyboard.add_hotkey('f9', lambda: self.toggle_signal.emit())
+            elif hk == "f10":
+                keyboard.add_hotkey('f10', lambda: self.toggle_signal.emit())
         except Exception as e:
             print("Hotkey listener error:", e)
 
@@ -514,10 +617,10 @@ class DictationWidget(QWidget):
             self.stop_dictation()
 
     def start_dictation(self):
-        self.move_to_active_monitor()
+        self.reposition_window()
         self.is_recording = True
         self.tray_icon.setIcon(self.rec_icon)
-        self.status_btn.setText("🔴 Запись...")
+        self.status_btn.setText("🔴 Идет запись...")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f38ba8;
@@ -529,8 +632,25 @@ class DictationWidget(QWidget):
         """)
         self.recorder.start()
 
+        if self.cfg.get("realtime_mode", False):
+            self.stream_timer.start()
+
+    def process_realtime_chunk(self):
+        if self.is_recording and not self.is_transcribing:
+            if self.recorder.get_current_audio_file(self.realtime_file):
+                model_size = self.cfg.get("model_size", "small")
+                self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size)
+                self.rt_thread.finished_signal.connect(self.on_realtime_finished)
+                self.rt_thread.start()
+
+    def on_realtime_finished(self, text):
+        if self.is_recording and text:
+            print("Realtime Partial Stream:", text)
+            if self.cfg.get("autopaste", True):
+                paste_text_to_window(self.target_hwnd, text + " ")
+
     def cancel_dictation(self):
-        print("CANCEL DICTATION CALLED!")
+        self.stream_timer.stop()
         if self.is_recording:
             self.recorder.cancel()
             self.is_recording = False
@@ -539,8 +659,7 @@ class DictationWidget(QWidget):
             try:
                 self.thread.terminate()
                 self.thread.wait(500)
-            except Exception as e:
-                print("Thread terminate exception:", e)
+            except Exception: pass
             self.is_transcribing = False
 
         self.tray_icon.setIcon(self.idle_icon)
@@ -557,10 +676,11 @@ class DictationWidget(QWidget):
         QTimer.singleShot(1200, self.reset_btn)
 
     def stop_dictation(self):
+        self.stream_timer.stop()
         self.is_recording = False
         self.is_transcribing = True
         self.tray_icon.setIcon(self.proc_icon)
-        self.status_btn.setText("⚡ Распознавание...")
+        self.status_btn.setText("⚡ ИИ-обработка...")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f9e2af;
@@ -573,7 +693,8 @@ class DictationWidget(QWidget):
         
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
-            self.thread = TranscribeThread(self.audio_file, model_size=self.current_model)
+            model_size = self.cfg.get("model_size", "small")
+            self.thread = TranscribeThread(self.audio_file, model_size=model_size)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
             self.thread.error_signal.connect(self.on_transcribe_error)
             self.thread.start()
@@ -582,7 +703,6 @@ class DictationWidget(QWidget):
 
     def on_transcribe_error(self, err):
         self.is_transcribing = False
-        print("Transcription Error caught gracefully:", err)
         self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("⚠️ Ошибка")
         self.status_btn.setStyleSheet("""
@@ -599,13 +719,11 @@ class DictationWidget(QWidget):
     def on_transcribe_finished(self, text):
         self.is_transcribing = False
         if text:
-            print("Recognized Text:", text)
             pyperclip.copy(text)
-            
             self.history.insert(0, text)
             self.history_list.insertItem(0, text)
             
-            if self.autopaste_enabled:
+            if self.cfg.get("autopaste", True) and not self.cfg.get("realtime_mode", False):
                 paste_text_to_window(self.target_hwnd, text)
                 self.status_btn.setText("🟢 Вставлено!")
             else:
@@ -628,30 +746,7 @@ class DictationWidget(QWidget):
         self.is_recording = False
         self.is_transcribing = False
         self.tray_icon.setIcon(self.idle_icon)
-        self.status_btn.setText("🔴 Запись (Колесико)")
-        self.status_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2a2b3d;
-                color: #89b4fa;
-                border: 1px solid #89b4fa;
-                border-radius: 14px;
-                padding: 0px 14px;
-            }
-            QPushButton:hover {
-                background-color: #89b4fa;
-                color: #11111b;
-            }
-        """)
-
-    def toggle_history_drawer(self):
-        if self.history_drawer.isVisible():
-            self.history_drawer.hide()
-            self.setFixedWidth(320)
-            self.adjustSize()
-        else:
-            self.setFixedWidth(500)
-            self.history_drawer.show()
-            self.adjustSize()
+        self.set_btn_ready_style()
 
     def copy_history_item(self, item):
         pyperclip.copy(item.text())
@@ -665,8 +760,15 @@ class DictationWidget(QWidget):
     def mouseMoveEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             delta = event.globalPosition().toPoint() - self.old_pos
-            self.move(self.x() + delta.x(), self.y() + delta.y())
+            new_pos = self.pos() + delta
+            self.move(new_pos)
             self.old_pos = event.globalPosition().toPoint()
+            
+            # Remember custom dragged coordinates
+            self.cfg["position_mode"] = "custom"
+            self.cfg["custom_x"] = self.x()
+            self.cfg["custom_y"] = self.y()
+            save_config(self.cfg)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
