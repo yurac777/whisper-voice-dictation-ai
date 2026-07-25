@@ -157,29 +157,29 @@ def paste_text_to_window(target_hwnd, text):
         current_thread = win32api.GetCurrentThreadId()
         target_thread, _ = win32process.GetWindowThreadProcessId(target_hwnd)
         
-        if current_thread != target_thread:
+        if current_thread != target_thread and target_thread != 0:
             win32process.AttachThreadInput(current_thread, target_thread, True)
 
         try:
             win32gui.ShowWindow(target_hwnd, win32con.SW_SHOW)
             win32gui.SetForegroundWindow(target_hwnd)
             win32gui.BringWindowToTop(target_hwnd)
-        except Exception:
-            pass
+        except Exception as ex:
+            print("SetForegroundWindow warning:", ex)
             
-        if current_thread != target_thread:
+        if current_thread != target_thread and target_thread != 0:
             win32process.AttachThreadInput(current_thread, target_thread, False)
 
-        time.sleep(0.1)
+        time.sleep(0.12)
 
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_SHIFT, 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-        time.sleep(0.02)
+        time.sleep(0.03)
 
         win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
         win32api.keybd_event(ord('V'), 0, 0, 0)
-        time.sleep(0.03)
+        time.sleep(0.04)
         win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
         win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
     except Exception as e:
@@ -481,6 +481,12 @@ class DictationWidget(QWidget):
         self.watchdog_timer.setSingleShot(True)
         self.watchdog_timer.timeout.connect(self.on_watchdog_timeout)
         
+        self.last_external_hwnd = None
+        self.window_tracker = QTimer(self)
+        self.window_tracker.setInterval(150)
+        self.window_tracker.timeout.connect(self._track_active_window)
+        self.window_tracker.start()
+
         self.init_ui()
         self.init_tray()
         self.init_listeners()
@@ -764,9 +770,21 @@ class DictationWidget(QWidget):
         except Exception as e:
             print("Hotkey listener error:", e)
 
+    def _track_active_window(self):
+        try:
+            hwnd = win32gui.GetForegroundWindow()
+            if hwnd and hwnd != int(self.winId()):
+                self.last_external_hwnd = hwnd
+        except Exception:
+            pass
+
     def toggle_recording(self):
         if not self.is_recording and not self.is_transcribing:
-            self.target_hwnd = win32gui.GetForegroundWindow()
+            fg = win32gui.GetForegroundWindow()
+            if fg and fg != int(self.winId()):
+                self.target_hwnd = fg
+            else:
+                self.target_hwnd = self.last_external_hwnd
             self.start_dictation()
         elif self.is_recording:
             self.stop_dictation()
@@ -920,8 +938,9 @@ class DictationWidget(QWidget):
             self.history.insert(0, text)
             self.history_list.insertItem(0, text)
             
-            if self.cfg.get("autopaste", True) and not self.cfg.get("realtime_mode", False):
-                paste_text_to_window(self.target_hwnd, text)
+            if self.cfg.get("autopaste", True):
+                target = self.target_hwnd if self.target_hwnd else self.last_external_hwnd
+                paste_text_to_window(target, text)
                 self.status_btn.setText("🟢 Вставлено!")
             else:
                 self.status_btn.setText("📋 В буфере!")
