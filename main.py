@@ -21,8 +21,7 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 ICON_PATH = os.path.join(APP_DIR, "whisper_icon.ico")
 LOG_PATH = os.path.join(APP_DIR, "app.log")
 
-# Enhanced prompt for max Russian accuracy and technical term spelling
-INITIAL_PROMPT = "Привет! Это профессиональная диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD, Яндекс, Сбер."
+INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 DEFAULT_CONFIG = {
     "hotkey": "middle_click",
@@ -31,7 +30,7 @@ DEFAULT_CONFIG = {
     "custom_y": -1,
     "realtime_mode": False,
     "autopaste": True,
-    "model_size": "turbo",
+    "model_size": "small",
     "language": "ru",
     "max_duration_sec": 60,
     "min_duration_sec": 0.2,
@@ -128,12 +127,11 @@ def convert_current_selection_layout():
     except Exception as e:
         print("Layout conversion error:", e)
 
-def get_whisper_model(size="turbo"):
+def get_whisper_model(size="small"):
     global MODELS
     if size not in MODELS:
         print(f"Loading OpenAI Whisper model '{size}'...")
-        # Use 12 CPU threads for maximum speed on 20-thread CPU
-        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=12)
+        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=8)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -239,7 +237,7 @@ class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     
-    def __init__(self, audio_file, model_size="turbo", language="ru"):
+    def __init__(self, audio_file, model_size="small", language="ru"):
         super().__init__()
         self.audio_file = audio_file
         self.model_size = model_size
@@ -251,14 +249,14 @@ class TranscribeThread(QThread):
             lang_param = None if self.language == "auto" else self.language
             segments, info = model.transcribe(
                 self.audio_file, 
-                beam_size=3, 
-                best_of=3,
+                beam_size=1, 
+                best_of=1,
                 temperature=0.0,
                 condition_on_previous_text=False,
                 language=lang_param, 
                 initial_prompt=INITIAL_PROMPT,
                 vad_filter=True, 
-                vad_parameters=dict(min_silence_duration_ms=300)
+                vad_parameters=dict(min_silence_duration_ms=400)
             )
             text = " ".join([segment.text for segment in segments]).strip()
             self.finished_signal.emit(text)
@@ -270,7 +268,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent_widget)
         self.cfg = cfg
         self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
-        self.setFixedWidth(460)
+        self.setFixedWidth(450)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -333,14 +331,14 @@ class SettingsDialog(QDialog):
         if idx_p >= 0: self.pos_combo.setCurrentIndex(idx_p)
         form.addRow("📍 Размещение виджета:", self.pos_combo)
 
-        # Model Selector with Turbo as Default!
+        # Model Selector
         self.model_combo = QComboBox()
-        self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Рекомендуется]", "turbo")
-        self.model_combo.addItem("⚡ Быстрая (small)", "small")
+        self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
+        self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo)", "turbo")
         self.model_combo.addItem("🏆 Максимум (large-v3)", "large-v3")
         
-        idx_m = self.model_combo.findData(self.cfg.get("model_size", "turbo"))
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "small"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
@@ -418,6 +416,11 @@ class DictationWidget(QWidget):
         self.max_recording_timer = QTimer(self)
         self.max_recording_timer.setSingleShot(True)
         self.max_recording_timer.timeout.connect(self.auto_stop_max_duration)
+
+        # Safety watchdog timer to unlock GUI if transcription takes > 15s
+        self.watchdog_timer = QTimer(self)
+        self.watchdog_timer.setSingleShot(True)
+        self.watchdog_timer.timeout.connect(self.on_watchdog_timeout)
         
         self.init_ui()
         self.init_tray()
@@ -555,7 +558,6 @@ class DictationWidget(QWidget):
     def set_btn_ready_style(self):
         hotkey_str = self.cfg.get("hotkey", "middle_click")
         lang_str = self.cfg.get("language", "ru").upper()
-        model_str = self.cfg.get("model_size", "turbo").upper()
         label = f"🟢 [{lang_str}] Надиктовать"
         if hotkey_str == "middle_click": label += " (Middle)"
         elif hotkey_str == "right_alt": label += " (R-Alt)"
@@ -677,6 +679,7 @@ class DictationWidget(QWidget):
     def start_dictation(self):
         self.reposition_window()
         self.is_recording = True
+        self.is_transcribing = False
         self.tray_icon.setIcon(self.rec_icon)
         self.status_btn.setText("🔴 Идет запись...")
         self.status_btn.setStyleSheet("""
@@ -704,7 +707,7 @@ class DictationWidget(QWidget):
     def process_realtime_chunk(self):
         if self.is_recording and not self.is_transcribing:
             if self.recorder.get_current_audio_file(self.realtime_file):
-                model_size = self.cfg.get("model_size", "turbo")
+                model_size = self.cfg.get("model_size", "small")
                 lang = self.cfg.get("language", "ru")
                 self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
@@ -719,16 +722,16 @@ class DictationWidget(QWidget):
     def cancel_dictation(self):
         self.stream_timer.stop()
         self.max_recording_timer.stop()
-        if self.is_recording:
-            self.recorder.cancel()
-            self.is_recording = False
-        
-        if self.is_transcribing and self.thread is not None:
+        self.watchdog_timer.stop()
+        self.is_recording = False
+        self.is_transcribing = False
+        self.recorder.cancel()
+
+        if self.thread is not None and self.thread.isRunning():
             try:
                 self.thread.terminate()
-                self.thread.wait(500)
+                self.thread.wait(300)
             except Exception: pass
-            self.is_transcribing = False
 
         self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("🚫 Отменено")
@@ -741,7 +744,7 @@ class DictationWidget(QWidget):
                 padding: 0px 14px;
             }
         """)
-        QTimer.singleShot(1200, self.reset_btn)
+        QTimer.singleShot(1000, self.reset_btn)
 
     def stop_dictation(self):
         self.stream_timer.stop()
@@ -770,10 +773,13 @@ class DictationWidget(QWidget):
                 padding: 0px 14px;
             }
         """)
+
+        # Start 15-second watchdog timer to unfreeze GUI if thread hangs downloading/processing
+        self.watchdog_timer.start(15000)
         
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
-            model_size = self.cfg.get("model_size", "turbo")
+            model_size = self.cfg.get("model_size", "small")
             lang = self.cfg.get("language", "ru")
             self.thread = TranscribeThread(self.audio_file, model_size=model_size, language=lang)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
@@ -782,7 +788,20 @@ class DictationWidget(QWidget):
         else:
             self.reset_btn()
 
+    def on_watchdog_timeout(self):
+        if self.is_transcribing:
+            print("Watchdog timeout triggered! Unfreezing GUI button...")
+            if self.thread and self.thread.isRunning():
+                try:
+                    self.thread.terminate()
+                    self.thread.wait(300)
+                except Exception: pass
+            self.is_transcribing = False
+            self.status_btn.setText("⚠️ Таймаут / Выберите Small")
+            QTimer.singleShot(2000, self.reset_btn)
+
     def on_transcribe_error(self, err):
+        self.watchdog_timer.stop()
         self.is_transcribing = False
         self.tray_icon.setIcon(self.idle_icon)
         self.status_btn.setText("⚠️ Ошибка")
@@ -798,6 +817,7 @@ class DictationWidget(QWidget):
         QTimer.singleShot(2000, self.reset_btn)
 
     def on_transcribe_finished(self, text):
+        self.watchdog_timer.stop()
         self.is_transcribing = False
         if text:
             pyperclip.copy(text)
@@ -824,6 +844,7 @@ class DictationWidget(QWidget):
             self.reset_btn()
 
     def reset_btn(self):
+        self.watchdog_timer.stop()
         self.is_recording = False
         self.is_transcribing = False
         self.tray_icon.setIcon(self.idle_icon)
