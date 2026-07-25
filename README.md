@@ -14,37 +14,36 @@
 </p>
 
 <p align="center">
-  <b>Ultra-fast, 100% offline, local AI voice dictation widget for Windows 11 with 99+ languages support, dynamic window auto-typing, customizable hotkeys, and Apple Dynamic Island-style UI.</b>
+  <b>Ultra-fast, 100% offline, local AI voice dictation widget for Windows 11 with 99+ languages support, dynamic window auto-typing, customizable hotkeys, intelligent accidental click defense, and Apple Dynamic Island-style UI.</b>
 </p>
 
 ---
 
-## 📦 1-Click Portable Download
+## 📦 1-Click Portable Download & Installation Guide
 
-No Python setup required! Download the pre-compiled, 100% portable `.exe` from GitHub Releases:
+No Python installation required! Follow these 2 simple steps:
 
-👉 **[📥 DOWNLOAD LATEST RELEASE (WhisperVoiceDictation.exe)](https://github.com/yurac777/whisper-voice-dictation-ai/releases)**
+### Step 1: Download the Executable
+👉 **[📥 DOWNLOAD LATEST RELEASE (v1.2.0 - WhisperVoiceDictation.exe)](https://github.com/yurac777/whisper-voice-dictation-ai/releases)**
 
-* 🚀 **100% Portable:** Zero installation required. Runs directly from USB or any folder.
-* 🛡️ **Local Logging (`app.log`):** Detailed event logs are saved next to the executable for easy debugging.
-* 🔒 **100% Offline & Private:** Audio is processed locally on CPU (INT8 quantized). No cloud APIs, subscriptions, or telemetry.
+### Step 2: Launch & Dictate!
+1. Save `WhisperVoiceDictation.exe` in any folder or USB drive.
+2. Double-click **`WhisperVoiceDictation.exe`** to launch.
+3. Focus any app (Telegram, VS Code, Browser, Word) and **Click Middle Mouse Button** to start dictation!
 
 ---
 
-## ✨ Features Breakdown
+## 📜 Release Notes & What's New in v1.2.0
 
-- 🌍 **99+ Multilingual Speech Recognition:** Powered by OpenAI Whisper (`CTranslate2` engine). Includes **Auto-Detect Language Mode** and dedicated presets for English, Spanish, German, French, Chinese, Japanese, Russian, Ukrainian, Polish, Turkish, and more.
-- 🎯 **Direct Window Focus Auto-Typing (`AttachThreadInput`):** Instantly types recognized text directly into whichever app you are focused on (Telegram, VS Code, Browser, Word, Discord, Notepad, etc.).
-- 🟢 **Vibrant Visual State Indicators:**
-  - `🟢 Ready` (Green) — App is active and listening for your hotkey.
-  - `🔴 Recording` (Pulsating Red) — Audio recording in progress.
-  - `⚡ Processing` (Yellow) — AI transcribing speech locally.
-  - `✅ Pasted` (Cyan/Green) — Text pasted directly into your active window.
-- ⌨️ **Customizable Hotkey Selector:** Change the trigger key in Settings (`⚙️`) to **Middle Mouse Click**, **Right Alt**, **Right Ctrl**, **F9**, or **F10**.
-- 🖥️ **Smart Multi-Monitor Jump:** The widget floating pill automatically tracks your active mouse cursor and docks at the top-center of the screen you are working on.
-- 📍 **Custom Widget Docking:** Choose default positioning (Top-Center, Bottom-Center, Top-Right, or Drag & Remember).
-- ⚡ **Live Real-time Streaming Mode:** Option to continuously stream and type text live every 2.5 seconds while speaking.
-- 🌐 **Instant Layout Converter (`Pause / Break`):** Convert mis-typed text between RU ↔ EN keyboard layouts (`гшиги` ↔ `github`).
+- 🌍 **99+ Multilingual Speech Recognition Engine:** Integrated OpenAI Whisper language selection with Auto-Detect Mode (`auto`) and dedicated presets for English, Spanish, German, French, Chinese, Japanese, Russian, Ukrainian, Polish, Turkish.
+- ⚙️ **Settings Dialog Modal (`SettingsDialog`):** Customize language, hotkey, max recording duration (10-300s), and accidental click sensitivity (0.1-2.0s).
+- 🛡️ **Intelligent Failsafes:**
+  - **Accidental Click Protection:** Cancels instantly if recording duration is `< 0.4s`.
+  - **Silence Volume Threshold:** Ignores pure background silence (`RMS < 0.008`).
+  - **Max Duration Timeout:** Auto-stops after 60 seconds to prevent run-away background recording.
+- 🟢 **Vibrant Green Ready Indicator:** Dynamic state colors (`🟢 Ready`, `🔴 Recording`, `⚡ Transcribing`, `✅ Pasted`).
+- ⌨️ **Custom Hotkeys:** Bind trigger to Middle Mouse Click, Right Alt, Right Ctrl, F9, or F10.
+- 📍 **Widget Position Docking:** Snap widget to Top-Center, Bottom-Center, Top-Right, or Drag & Remember position.
 
 ---
 
@@ -55,18 +54,6 @@ No Python setup required! Download the pre-compiled, 100% portable `.exe` from G
 | **Middle Click / R-Alt / R-Ctrl / F9 / F10** | Start / Stop Voice Dictation |
 | **`ESC`** | Cancel active recording / transcription immediately |
 | **`Pause / Break`** | Convert layout of selected text (RU ↔ EN) |
-
----
-
-## 🌍 Multilingual Usage Guide
-
-1. Click **⚙️ Settings** on the widget bar.
-2. Select your desired language from **🌍 Language / Язык**:
-   - `🌐 Auto-Detect` — Automatically identifies the language you speak.
-   - `🇺🇸 English` — Optimized for English dictation and technical terminology.
-   - `🇷🇺 Russian` — Optimized for Russian dictation.
-   - `🇪🇸 Spanish / 🇩🇪 German / 🇫🇷 French / 🇨🇳 Chinese / 🇯🇵 Japanese`, etc.
-3. Click **💾 Save Settings**.
 
 ---
 

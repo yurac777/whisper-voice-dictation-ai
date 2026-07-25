@@ -9,7 +9,7 @@ import keyboard
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPoint
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
-                             QVBoxLayout, QLabel, QListWidget, QComboBox, QCheckBox,
+                             QVBoxLayout, QLabel, QListWidget, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
                              QSystemTrayIcon, QMenu, QDialog, QFormLayout, QGroupBox)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor, QPixmap, QPainter, QBrush, QPen, QCursor
 
@@ -268,7 +268,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent_widget)
         self.cfg = cfg
         self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
-        self.setFixedWidth(430)
+        self.setFixedWidth(450)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -276,14 +276,14 @@ class SettingsDialog(QDialog):
             }
             QLabel {
                 color: #cdd6f4;
-                font-size: 13px;
+                font-size: 12px;
             }
-            QComboBox, QCheckBox {
+            QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox {
                 background-color: #313244;
                 color: #cdd6f4;
                 border: 1px solid #45475a;
                 border-radius: 6px;
-                padding: 6px;
+                padding: 5px;
             }
             QPushButton {
                 background-color: #89b4fa;
@@ -341,6 +341,21 @@ class SettingsDialog(QDialog):
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
+        # Max duration limit (seconds)
+        self.max_dur_spin = QSpinBox()
+        self.max_dur_spin.setRange(10, 300)
+        self.max_dur_spin.setSuffix(" сек")
+        self.max_dur_spin.setValue(self.cfg.get("max_duration_sec", 60))
+        form.addRow("⏱️ Макс. длительность записи:", self.max_dur_spin)
+
+        # Accidental click protection threshold (seconds)
+        self.min_dur_spin = QDoubleSpinBox()
+        self.min_dur_spin.setRange(0.1, 2.0)
+        self.min_dur_spin.setSingleStep(0.1)
+        self.min_dur_spin.setSuffix(" сек")
+        self.min_dur_spin.setValue(self.cfg.get("min_duration_sec", 0.4))
+        form.addRow("⚡ Защита от коротких кликов:", self.min_dur_spin)
+
         # Real-time streaming checkbox
         self.realtime_chk = QCheckBox("Печать в реальном времени (Live Streaming)")
         self.realtime_chk.setChecked(self.cfg.get("realtime_mode", False))
@@ -362,6 +377,8 @@ class SettingsDialog(QDialog):
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
         self.cfg["position_mode"] = self.pos_combo.currentData()
         self.cfg["model_size"] = self.model_combo.currentData()
+        self.cfg["max_duration_sec"] = self.max_dur_spin.value()
+        self.cfg["min_duration_sec"] = self.min_dur_spin.value()
         self.cfg["realtime_mode"] = self.realtime_chk.isChecked()
         self.cfg["autopaste"] = self.autopaste_chk.isChecked()
         save_config(self.cfg)
@@ -395,7 +412,6 @@ class DictationWidget(QWidget):
         self.stream_timer.setInterval(2500)
         self.stream_timer.timeout.connect(self.process_realtime_chunk)
 
-        # Max recording duration timer (Safety limit: 60 sec)
         self.max_recording_timer = QTimer(self)
         self.max_recording_timer.setSingleShot(True)
         self.max_recording_timer.timeout.connect(self.auto_stop_max_duration)
@@ -670,7 +686,6 @@ class DictationWidget(QWidget):
         """)
         self.recorder.start()
 
-        # Start max duration 60s timeout timer
         max_sec = self.cfg.get("max_duration_sec", 60)
         self.max_recording_timer.start(max_sec * 1000)
 
@@ -679,7 +694,7 @@ class DictationWidget(QWidget):
 
     def auto_stop_max_duration(self):
         if self.is_recording:
-            print("Max recording duration reached (60s). Auto-stopping...")
+            print("Max recording duration reached. Auto-stopping...")
             self.stop_dictation()
 
     def process_realtime_chunk(self):
@@ -729,12 +744,10 @@ class DictationWidget(QWidget):
         self.max_recording_timer.stop()
         self.is_recording = False
 
-        # Edge-case Check 1: Check audio duration and silence RMS volume
         duration, max_rms = self.recorder.get_stats()
         min_dur = self.cfg.get("min_duration_sec", 0.4)
         min_rms = self.cfg.get("silence_rms_threshold", 0.008)
 
-        # Accidental click check (< 0.4s)
         if duration < min_dur:
             print(f"Accidental click detected ({duration:.2f}s < {min_dur}s). Cancelling...")
             self.recorder.cancel()
@@ -742,7 +755,6 @@ class DictationWidget(QWidget):
             QTimer.singleShot(1000, self.reset_btn)
             return
 
-        # Pure silence check (No voice detected)
         if max_rms < min_rms:
             print(f"Pure silence detected (RMS {max_rms:.4f} < {min_rms}). Cancelling...")
             self.recorder.cancel()
