@@ -21,7 +21,8 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 ICON_PATH = os.path.join(APP_DIR, "whisper_icon.ico")
 LOG_PATH = os.path.join(APP_DIR, "app.log")
 
-INITIAL_PROMPT = "Привет! This is dictation: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
+# Enhanced prompt for max Russian accuracy and technical term spelling
+INITIAL_PROMPT = "Привет! Это профессиональная диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD, Яндекс, Сбер."
 
 DEFAULT_CONFIG = {
     "hotkey": "middle_click",
@@ -30,7 +31,7 @@ DEFAULT_CONFIG = {
     "custom_y": -1,
     "realtime_mode": False,
     "autopaste": True,
-    "model_size": "small",
+    "model_size": "turbo",
     "language": "ru",
     "max_duration_sec": 60,
     "min_duration_sec": 0.2,
@@ -127,11 +128,12 @@ def convert_current_selection_layout():
     except Exception as e:
         print("Layout conversion error:", e)
 
-def get_whisper_model(size="small"):
+def get_whisper_model(size="turbo"):
     global MODELS
     if size not in MODELS:
         print(f"Loading OpenAI Whisper model '{size}'...")
-        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=8)
+        # Use 12 CPU threads for maximum speed on 20-thread CPU
+        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=12)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -237,7 +239,7 @@ class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     
-    def __init__(self, audio_file, model_size="small", language="ru"):
+    def __init__(self, audio_file, model_size="turbo", language="ru"):
         super().__init__()
         self.audio_file = audio_file
         self.model_size = model_size
@@ -249,14 +251,14 @@ class TranscribeThread(QThread):
             lang_param = None if self.language == "auto" else self.language
             segments, info = model.transcribe(
                 self.audio_file, 
-                beam_size=1, 
-                best_of=1,
+                beam_size=3, 
+                best_of=3,
                 temperature=0.0,
                 condition_on_previous_text=False,
                 language=lang_param, 
                 initial_prompt=INITIAL_PROMPT,
                 vad_filter=True, 
-                vad_parameters=dict(min_silence_duration_ms=400)
+                vad_parameters=dict(min_silence_duration_ms=300)
             )
             text = " ".join([segment.text for segment in segments]).strip()
             self.finished_signal.emit(text)
@@ -268,7 +270,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent_widget)
         self.cfg = cfg
         self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
-        self.setFixedWidth(450)
+        self.setFixedWidth(460)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -331,13 +333,14 @@ class SettingsDialog(QDialog):
         if idx_p >= 0: self.pos_combo.setCurrentIndex(idx_p)
         form.addRow("📍 Размещение виджета:", self.pos_combo)
 
-        # Model Selector
+        # Model Selector with Turbo as Default!
         self.model_combo = QComboBox()
+        self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Рекомендуется]", "turbo")
         self.model_combo.addItem("⚡ Быстрая (small)", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
-        self.model_combo.addItem("🚀 Макс (large-v3)", "large-v3")
+        self.model_combo.addItem("🏆 Максимум (large-v3)", "large-v3")
         
-        idx_m = self.model_combo.findData(self.cfg.get("model_size", "small"))
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "turbo"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
@@ -552,6 +555,7 @@ class DictationWidget(QWidget):
     def set_btn_ready_style(self):
         hotkey_str = self.cfg.get("hotkey", "middle_click")
         lang_str = self.cfg.get("language", "ru").upper()
+        model_str = self.cfg.get("model_size", "turbo").upper()
         label = f"🟢 [{lang_str}] Надиктовать"
         if hotkey_str == "middle_click": label += " (Middle)"
         elif hotkey_str == "right_alt": label += " (R-Alt)"
@@ -700,7 +704,7 @@ class DictationWidget(QWidget):
     def process_realtime_chunk(self):
         if self.is_recording and not self.is_transcribing:
             if self.recorder.get_current_audio_file(self.realtime_file):
-                model_size = self.cfg.get("model_size", "small")
+                model_size = self.cfg.get("model_size", "turbo")
                 lang = self.cfg.get("language", "ru")
                 self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
@@ -747,7 +751,6 @@ class DictationWidget(QWidget):
         duration, max_rms = self.recorder.get_stats()
         min_dur = self.cfg.get("min_duration_sec", 0.2)
 
-        # Accidental short click check (< 0.2s)
         if duration < min_dur:
             print(f"Accidental click detected ({duration:.2f}s < {min_dur}s). Cancelling...")
             self.recorder.cancel()
@@ -770,7 +773,7 @@ class DictationWidget(QWidget):
         
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
-            model_size = self.cfg.get("model_size", "small")
+            model_size = self.cfg.get("model_size", "turbo")
             lang = self.cfg.get("language", "ru")
             self.thread = TranscribeThread(self.audio_file, model_size=model_size, language=lang)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
