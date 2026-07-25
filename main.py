@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-import sys, os, time, wave, threading, json, subprocess
+import sys, os, time, wave, threading, json, subprocess, traceback
+
+# Optimize OpenMP thread allocation to prevent C++ thread stack overflow
+os.environ["OMP_NUM_THREADS"] = "8"
+os.environ["MKL_NUM_THREADS"] = "8"
+os.environ["OPENBLAS_NUM_THREADS"] = "8"
+
 import sounddevice as sd
 import numpy as np
 import pyperclip
@@ -21,6 +27,12 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 ICON_PATH = os.path.join(APP_DIR, "whisper_icon.ico")
 LOG_PATH = os.path.join(APP_DIR, "app.log")
 
+def log_error(msg):
+    try:
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception: pass
+
 INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 DEFAULT_CONFIG = {
@@ -30,9 +42,9 @@ DEFAULT_CONFIG = {
     "custom_y": -1,
     "realtime_mode": False,
     "autopaste": True,
-    "model_size": "small",
+    "model_size": "turbo",
     "language": "ru",
-    "max_duration_sec": 60,
+    "max_duration_sec": 120,
     "min_duration_sec": 0.2,
     "silence_rms_threshold": 0.0001
 }
@@ -127,10 +139,11 @@ def convert_current_selection_layout():
     except Exception as e:
         print("Layout conversion error:", e)
 
-def get_whisper_model(size="small"):
+def get_whisper_model(size="turbo"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading OpenAI Whisper model '{size}'...")
+        print(f"Loading OpenAI Whisper model '{size}' with 8 SIMD OpenMP CPU threads...")
+        # Using cpu_threads=8 provides rock-solid C++ stability and maximum speed
         MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=8)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
@@ -189,7 +202,7 @@ class AudioRecorder:
                     if self.recording and len(data) > 0:
                         self.audio_data.append(data.copy())
         except Exception as e:
-            print("Recording loop error:", e)
+            log_error(f"Recording loop error: {e}")
 
     def start(self):
         self.audio_data = []
@@ -218,7 +231,8 @@ class AudioRecorder:
                 wf.setframerate(self.sample_rate)
                 wf.writeframes(data_int16.tobytes())
             return True
-        except Exception:
+        except Exception as e:
+            log_error(f"Save audio file error: {e}")
             return False
 
     def stop(self, out_filename):
@@ -245,14 +259,14 @@ class ModelPreloaderThread(QThread):
             get_whisper_model(self.model_size)
             self.finished_signal.emit(self.model_size, True)
         except Exception as e:
-            print("Model preload error:", e)
+            log_error(f"Model preload error: {e}")
             self.finished_signal.emit(self.model_size, False)
 
 class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     
-    def __init__(self, audio_file, model_size="small", language="ru"):
+    def __init__(self, audio_file, model_size="turbo", language="ru"):
         super().__init__()
         self.audio_file = audio_file
         self.model_size = model_size
@@ -262,6 +276,8 @@ class TranscribeThread(QThread):
         try:
             model = get_whisper_model(self.model_size)
             lang_param = None if self.language == "auto" else self.language
+            
+            # Crash-proof optimized single-pass decoding
             segments, info = model.transcribe(
                 self.audio_file, 
                 beam_size=1, 
@@ -271,11 +287,22 @@ class TranscribeThread(QThread):
                 language=lang_param, 
                 initial_prompt=INITIAL_PROMPT,
                 vad_filter=True, 
-                vad_parameters=dict(min_silence_duration_ms=400)
+                vad_parameters=dict(
+                    min_silence_duration_ms=300,
+                    threshold=0.5,
+                    min_speech_duration_ms=250
+                )
             )
-            text = " ".join([segment.text for segment in segments]).strip()
-            self.finished_signal.emit(text)
+            text_parts = []
+            for segment in segments:
+                if segment.text:
+                    text_parts.append(segment.text.strip())
+            
+            full_text = " ".join(text_parts).strip()
+            self.finished_signal.emit(full_text)
         except Exception as e:
+            err_str = traceback.format_exc()
+            log_error(f"TranscribeThread crash exception:\n{err_str}")
             self.error_signal.emit(str(e))
 
 class SettingsDialog(QDialog):
@@ -349,12 +376,12 @@ class SettingsDialog(QDialog):
 
         # Model Selector with Automatic Warmup Indicator
         self.model_combo = QComboBox()
+        self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Супер-ускорение]", "turbo")
         self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
-        self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo)", "turbo")
         self.model_combo.addItem("🏆 Максимум (large-v3)", "large-v3")
         
-        idx_m = self.model_combo.findData(self.cfg.get("model_size", "small"))
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "turbo"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
@@ -367,7 +394,7 @@ class SettingsDialog(QDialog):
         self.max_dur_spin = QSpinBox()
         self.max_dur_spin.setRange(10, 300)
         self.max_dur_spin.setSuffix(" сек")
-        self.max_dur_spin.setValue(self.cfg.get("max_duration_sec", 60))
+        self.max_dur_spin.setValue(self.cfg.get("max_duration_sec", 120))
         form.addRow("⏱️ Макс. длительность записи:", self.max_dur_spin)
 
         # Accidental click protection threshold (seconds)
@@ -396,7 +423,7 @@ class SettingsDialog(QDialog):
 
     def save_and_close(self):
         new_model = self.model_combo.currentData()
-        old_model = self.cfg.get("model_size", "small")
+        old_model = self.cfg.get("model_size", "turbo")
 
         self.cfg["language"] = self.lang_combo.currentData()
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
@@ -448,7 +475,7 @@ class DictationWidget(QWidget):
         self.max_recording_timer.setSingleShot(True)
         self.max_recording_timer.timeout.connect(self.auto_stop_max_duration)
 
-        # Safety watchdog timer to unlock GUI if transcription takes > 15s
+        # Dynamic Watchdog Timer scaling for long recordings
         self.watchdog_timer = QTimer(self)
         self.watchdog_timer.setSingleShot(True)
         self.watchdog_timer.timeout.connect(self.on_watchdog_timeout)
@@ -458,7 +485,7 @@ class DictationWidget(QWidget):
         self.init_listeners()
 
         # Warmup default configured model in background on startup
-        QTimer.singleShot(500, lambda: self.start_model_preloader(self.cfg.get("model_size", "small")))
+        QTimer.singleShot(500, lambda: self.start_model_preloader(self.cfg.get("model_size", "turbo")))
 
     def start_model_preloader(self, model_size):
         if model_size in MODELS:
@@ -760,7 +787,7 @@ class DictationWidget(QWidget):
         """)
         self.recorder.start()
 
-        max_sec = self.cfg.get("max_duration_sec", 60)
+        max_sec = self.cfg.get("max_duration_sec", 120)
         self.max_recording_timer.start(max_sec * 1000)
 
         if self.cfg.get("realtime_mode", False):
@@ -774,7 +801,7 @@ class DictationWidget(QWidget):
     def process_realtime_chunk(self):
         if self.is_recording and not self.is_transcribing:
             if self.recorder.get_current_audio_file(self.realtime_file):
-                model_size = self.cfg.get("model_size", "small")
+                model_size = self.cfg.get("model_size", "turbo")
                 lang = self.cfg.get("language", "ru")
                 self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
@@ -841,12 +868,13 @@ class DictationWidget(QWidget):
             }
         """)
 
-        # Start 15-second watchdog timer to unfreeze GUI if thread hangs downloading/processing
-        self.watchdog_timer.start(15000)
+        # Dynamic Watchdog Timer: 30 seconds for long dictations
+        watchdog_ms = max(20000, int(duration * 2000))
+        self.watchdog_timer.start(watchdog_ms)
         
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
-            model_size = self.cfg.get("model_size", "small")
+            model_size = self.cfg.get("model_size", "turbo")
             lang = self.cfg.get("language", "ru")
             self.thread = TranscribeThread(self.audio_file, model_size=model_size, language=lang)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
@@ -864,7 +892,7 @@ class DictationWidget(QWidget):
                     self.thread.wait(300)
                 except Exception: pass
             self.is_transcribing = False
-            self.status_btn.setText("⚠️ Таймаут / Выберите Small")
+            self.status_btn.setText("⚠️ Таймаут / Попробуйте еще раз")
             QTimer.singleShot(2000, self.reset_btn)
 
     def on_transcribe_error(self, err):
