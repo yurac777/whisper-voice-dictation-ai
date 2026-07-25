@@ -1,0 +1,40 @@
+name: 🚀 Build Portable Release EXE
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Whisper Voice Dictation EXE
+    runs-on: windows-2022
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 🐍 Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: 🛠️ Build Executable with PyInstaller
+        run: |
+          pyinstaller --noconsole --onefile --icon=whisper_icon.ico --name=WhisperVoiceDictation --collect-all ctranslate2 --collect-all faster_whisper --collect-all sounddevice --collect-all cffi main.py
+
+      - name: 📦 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: dist/WhisperVoiceDictation.exe
+          body_path: CHANGELOG.md
+          token: ${{ secrets.GITHUB_TOKEN }}

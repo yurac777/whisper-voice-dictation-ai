@@ -21,7 +21,7 @@ CONFIG_PATH = os.path.join(APP_DIR, "config.json")
 ICON_PATH = os.path.join(APP_DIR, "whisper_icon.ico")
 LOG_PATH = os.path.join(APP_DIR, "app.log")
 
-INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
+INITIAL_PROMPT = "Привет! This is dictation: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 DEFAULT_CONFIG = {
     "hotkey": "middle_click",
@@ -30,8 +30,23 @@ DEFAULT_CONFIG = {
     "custom_y": -1,
     "realtime_mode": False,
     "autopaste": True,
-    "model_size": "small"
+    "model_size": "small",
+    "language": "ru"
 }
+
+LANGUAGES = [
+    ("🌐 Автоопределение (Auto-detect)", "auto"),
+    ("🇷🇺 Русский (Russian)", "ru"),
+    ("🇺🇸 English (Английский)", "en"),
+    ("🇪🇸 Español (Испанский)", "es"),
+    ("🇩🇪 Deutsch (Немецкий)", "de"),
+    ("🇫🇷 Français (Французский)", "fr"),
+    ("🇨🇳 中文 (Китайский)", "zh"),
+    ("🇯🇵 日本語 (Японский)", "ja"),
+    ("🇺🇦 Українська (Украинский)", "uk"),
+    ("🇵🇱 Polski (Польский)", "pl"),
+    ("🇹🇷 Türkçe (Турецкий)", "tr")
+]
 
 def load_config():
     if os.path.exists(CONFIG_PATH):
@@ -209,21 +224,23 @@ class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     
-    def __init__(self, audio_file, model_size="small"):
+    def __init__(self, audio_file, model_size="small", language="ru"):
         super().__init__()
         self.audio_file = audio_file
         self.model_size = model_size
+        self.language = language
 
     def run(self):
         try:
             model = get_whisper_model(self.model_size)
+            lang_param = None if self.language == "auto" else self.language
             segments, info = model.transcribe(
                 self.audio_file, 
                 beam_size=1, 
                 best_of=1,
                 temperature=0.0,
                 condition_on_previous_text=False,
-                language="ru", 
+                language=lang_param, 
                 initial_prompt=INITIAL_PROMPT,
                 vad_filter=True, 
                 vad_parameters=dict(min_silence_duration_ms=400)
@@ -237,8 +254,8 @@ class SettingsDialog(QDialog):
     def __init__(self, parent_widget, cfg):
         super().__init__(parent_widget)
         self.cfg = cfg
-        self.setWindowTitle("⚙️ Настройки Whisper Voice AI")
-        self.setFixedWidth(400)
+        self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
+        self.setFixedWidth(430)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -268,8 +285,15 @@ class SettingsDialog(QDialog):
         """)
 
         layout = QVBoxLayout(self)
-
         form = QFormLayout()
+
+        # Language selector
+        self.lang_combo = QComboBox()
+        for label, code in LANGUAGES:
+            self.lang_combo.addItem(label, code)
+        idx_l = self.lang_combo.findData(self.cfg.get("language", "ru"))
+        if idx_l >= 0: self.lang_combo.setCurrentIndex(idx_l)
+        form.addRow("🌍 Язык / Language:", self.lang_combo)
 
         # Hotkey selector
         self.hotkey_combo = QComboBox()
@@ -316,11 +340,12 @@ class SettingsDialog(QDialog):
 
         layout.addLayout(form)
 
-        save_btn = QPushButton("💾 Сохранить настройки")
+        save_btn = QPushButton("💾 Сохранить настройки / Save Settings")
         save_btn.clicked.connect(self.save_and_close)
         layout.addWidget(save_btn)
 
     def save_and_close(self):
+        self.cfg["language"] = self.lang_combo.currentData()
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
         self.cfg["position_mode"] = self.pos_combo.currentData()
         self.cfg["model_size"] = self.model_combo.currentData()
@@ -353,7 +378,6 @@ class DictationWidget(QWidget):
         self.toggle_signal.connect(self.toggle_recording)
         self.cancel_signal.connect(self.cancel_dictation)
         
-        # Realtime Streaming Timer
         self.stream_timer = QTimer(self)
         self.stream_timer.setInterval(2500)
         self.stream_timer.timeout.connect(self.process_realtime_chunk)
@@ -386,7 +410,6 @@ class DictationWidget(QWidget):
         pill_layout.setContentsMargins(8, 4, 8, 4)
         pill_layout.setSpacing(6)
 
-        # 1. Main Status & Record Button (Green Idle Ready State)
         self.status_btn = QPushButton("🟢 Надиктовать")
         self.status_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
         self.status_btn.setFixedHeight(30)
@@ -395,7 +418,6 @@ class DictationWidget(QWidget):
         self.status_btn.clicked.connect(self.toggle_recording)
         pill_layout.addWidget(self.status_btn)
 
-        # 2. Popup Settings & Tools Button (⚙️)
         self.menu_btn = QPushButton("⚙️")
         self.menu_btn.setFixedSize(30, 30)
         self.menu_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
@@ -411,11 +433,10 @@ class DictationWidget(QWidget):
                 color: #ffffff;
             }
         """)
-        self.menu_btn.setToolTip("Настройки")
+        self.menu_btn.setToolTip("Настройки / Settings")
         self.menu_btn.clicked.connect(self.open_settings_dialog)
         pill_layout.addWidget(self.menu_btn)
 
-        # 3. Cancel Button (❌)
         self.cancel_btn = QPushButton("❌")
         self.cancel_btn.setFixedSize(30, 30)
         self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -435,7 +456,6 @@ class DictationWidget(QWidget):
         self.cancel_btn.clicked.connect(self.cancel_dictation)
         pill_layout.addWidget(self.cancel_btn)
 
-        # 4. Close Button (✕)
         self.close_btn = QPushButton("✕")
         self.close_btn.setFixedSize(30, 30)
         self.close_btn.setFont(QFont("Segoe UI", 10, QFont.Weight.Bold))
@@ -451,13 +471,12 @@ class DictationWidget(QWidget):
                 color: #11111b;
             }
         """)
-        self.close_btn.setToolTip("Закрыть")
+        self.close_btn.setToolTip("Закрыть / Exit")
         self.close_btn.clicked.connect(QApplication.quit)
         pill_layout.addWidget(self.close_btn)
 
         outer_layout.addWidget(self.pill_bar)
 
-        # History Drawer
         self.history_drawer = QWidget()
         self.history_drawer.setObjectName("HistoryDrawer")
         self.history_drawer.setStyleSheet("""
@@ -471,7 +490,7 @@ class DictationWidget(QWidget):
         drawer_layout = QVBoxLayout(self.history_drawer)
         drawer_layout.setContentsMargins(10, 10, 10, 10)
         
-        hist_title = QLabel("📜 История надиктованного текста:")
+        hist_title = QLabel("📜 History / История:")
         hist_title.setStyleSheet("color: #cdd6f4; font-size: 11px; border: none; font-weight: bold;")
         drawer_layout.addWidget(hist_title)
 
@@ -498,8 +517,9 @@ class DictationWidget(QWidget):
 
     def set_btn_ready_style(self):
         hotkey_str = self.cfg.get("hotkey", "middle_click")
-        label = "🟢 Надиктовать"
-        if hotkey_str == "middle_click": label += " (Колесико)"
+        lang_str = self.cfg.get("language", "ru").upper()
+        label = f"🟢 [{lang_str}] Надиктовать"
+        if hotkey_str == "middle_click": label += " (Middle)"
         elif hotkey_str == "right_alt": label += " (R-Alt)"
         elif hotkey_str == "right_ctrl": label += " (R-Ctrl)"
         elif hotkey_str == "f9": label += " (F9)"
@@ -559,7 +579,7 @@ class DictationWidget(QWidget):
         show_action.triggered.connect(self.toggle_visibility)
         tray_menu.addAction(show_action)
 
-        settings_action = QAction("⚙️ Настройки", self)
+        settings_action = QAction("⚙️ Настройки / Settings", self)
         settings_action.triggered.connect(self.open_settings_dialog)
         tray_menu.addAction(settings_action)
 
@@ -568,7 +588,7 @@ class DictationWidget(QWidget):
         tray_menu.addAction(quit_action)
 
         self.tray_icon.setContextMenu(tray_menu)
-        self.tray_icon.setToolTip("Whisper AI Голосовой Ввод")
+        self.tray_icon.setToolTip("Whisper AI Multilingual Dictation")
         self.tray_icon.show()
 
     def toggle_visibility(self):
@@ -639,7 +659,8 @@ class DictationWidget(QWidget):
         if self.is_recording and not self.is_transcribing:
             if self.recorder.get_current_audio_file(self.realtime_file):
                 model_size = self.cfg.get("model_size", "small")
-                self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size)
+                lang = self.cfg.get("language", "ru")
+                self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
                 self.rt_thread.start()
 
@@ -694,7 +715,8 @@ class DictationWidget(QWidget):
         has_data = self.recorder.stop(self.audio_file)
         if has_data:
             model_size = self.cfg.get("model_size", "small")
-            self.thread = TranscribeThread(self.audio_file, model_size=model_size)
+            lang = self.cfg.get("language", "ru")
+            self.thread = TranscribeThread(self.audio_file, model_size=model_size, language=lang)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
             self.thread.error_signal.connect(self.on_transcribe_error)
             self.thread.start()
@@ -764,7 +786,6 @@ class DictationWidget(QWidget):
             self.move(new_pos)
             self.old_pos = event.globalPosition().toPoint()
             
-            # Remember custom dragged coordinates
             self.cfg["position_mode"] = "custom"
             self.cfg["custom_x"] = self.x()
             self.cfg["custom_y"] = self.y()
