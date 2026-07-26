@@ -8,7 +8,7 @@ C:\Users\Lenovo\.whisper_env\Scripts\python.exe -m pip install pyinstaller
 
 echo.
 echo Сборка WhisperVoiceDictation.exe в виртуальном окружении...
-C:\Users\Lenovo\.whisper_env\Scripts\pyinstaller.exe --noconsole --onefile --icon=whisper_icon.ico --name=WhisperVoiceDictation --collect-all ctranslate2 --collect-all faster_whisper --collect-all sounddevice --collect-all cffi main.py
+C:\Users\Lenovo\.whisper_env\Scripts\pyinstaller.exe --noconsole --onefile --clean --icon=whisper_icon.ico --name=WhisperVoiceDictation --collect-all ctranslate2 --collect-all faster_whisper --collect-all sounddevice --collect-all cffi --collect-all onnxruntime main.py
 
 echo.
 echo ===================================================
