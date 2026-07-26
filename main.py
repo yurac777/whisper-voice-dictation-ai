@@ -234,6 +234,15 @@ class AudioRecorder:
             log_error(f"Save audio file error: {e}")
             return False
 
+    def get_numpy_audio(self):
+        if not self.audio_data:
+            return None
+        try:
+            return np.concatenate(self.audio_data, axis=0).flatten().astype(np.float32)
+        except Exception as e:
+            log_error(f"get_numpy_audio error: {e}")
+            return None
+
     def stop(self, out_filename):
         self.recording = False
         if self.record_thread and self.record_thread.is_alive():
@@ -261,13 +270,32 @@ class ModelPreloaderThread(QThread):
             log_error(f"Model preload error: {e}")
             self.finished_signal.emit(self.model_size, False)
 
+HALLUCINATIONS = [
+    "субтитры", "субтитры создавал", "субтитры добавил", "редактор", 
+    "переводчик", "продолжение следует", "спасибо за просмотр",
+    "до скорой встречи", "подписывайтесь на канал", "ставьте лайки",
+    "сообщество субтитров", "автор субтитров", "корректор", "субтитры:"
+]
+
+def clean_hallucinated_subtitles(text):
+    if not text:
+        return ""
+    text_clean = text.strip()
+    text_lower = text_clean.lower()
+    for h in HALLUCINATIONS:
+        if text_lower == h or text_lower.startswith(h) or text_lower.endswith(h):
+            if len(text_clean) < 50:
+                print(f"Filtered out Whisper hallucination: '{text_clean}'")
+                return ""
+    return text_clean
+
 class TranscribeThread(QThread):
     finished_signal = pyqtSignal(str)
     error_signal = pyqtSignal(str)
     
-    def __init__(self, audio_file, model_size="turbo", language="ru"):
+    def __init__(self, audio_data, model_size="turbo", language="ru"):
         super().__init__()
-        self.audio_file = audio_file
+        self.audio_data = audio_data
         self.model_size = model_size
         self.language = language
 
@@ -278,7 +306,7 @@ class TranscribeThread(QThread):
             
             # Hyper-Optimized 25x Speed Decoding
             segments, info = model.transcribe(
-                self.audio_file, 
+                self.audio_data, 
                 beam_size=1, 
                 best_of=1,
                 temperature=0.0,
@@ -300,6 +328,7 @@ class TranscribeThread(QThread):
                     text_parts.append(segment.text.strip())
             
             full_text = " ".join(text_parts).strip()
+            full_text = clean_hallucinated_subtitles(full_text)
             self.finished_signal.emit(full_text)
         except Exception as e:
             err_str = traceback.format_exc()
@@ -819,10 +848,11 @@ class DictationWidget(QWidget):
 
     def process_realtime_chunk(self):
         if self.is_recording and not self.is_transcribing:
-            if self.recorder.get_current_audio_file(self.realtime_file):
+            audio_np = self.recorder.get_numpy_audio()
+            if audio_np is not None and len(audio_np) > 0:
                 model_size = self.cfg.get("model_size", "turbo")
                 lang = self.cfg.get("language", "ru")
-                self.rt_thread = TranscribeThread(self.realtime_file, model_size=model_size, language=lang)
+                self.rt_thread = TranscribeThread(audio_np, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
                 self.rt_thread.start()
 
@@ -891,11 +921,12 @@ class DictationWidget(QWidget):
         watchdog_ms = max(20000, int(duration * 2000))
         self.watchdog_timer.start(watchdog_ms)
         
-        has_data = self.recorder.stop(self.audio_file)
-        if has_data:
+        audio_np = self.recorder.get_numpy_audio()
+        self.recorder.stop(self.audio_file)
+        if audio_np is not None and len(audio_np) > 0:
             model_size = self.cfg.get("model_size", "turbo")
             lang = self.cfg.get("language", "ru")
-            self.thread = TranscribeThread(self.audio_file, model_size=model_size, language=lang)
+            self.thread = TranscribeThread(audio_np, model_size=model_size, language=lang)
             self.thread.finished_signal.connect(self.on_transcribe_finished)
             self.thread.error_signal.connect(self.on_transcribe_error)
             self.thread.start()
