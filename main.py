@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import sys, os, time, wave, threading, json, subprocess, traceback
+import sys, os, time, wave, threading, json, subprocess, traceback, re, shutil, datetime
 
 # Optimize OpenMP thread allocation to prevent C++ thread stack overflow
 os.environ["OMP_NUM_THREADS"] = "10"
@@ -46,7 +46,8 @@ DEFAULT_CONFIG = {
     "language": "ru",
     "max_duration_sec": 120,
     "min_duration_sec": 0.2,
-    "silence_rms_threshold": 0.0001
+    "silence_rms_threshold": 0.0001,
+    "save_audio_logs": True
 }
 
 LANGUAGES = [
@@ -142,8 +143,22 @@ def convert_current_selection_layout():
 def get_whisper_model(size="turbo"):
     global MODELS
     if size not in MODELS:
-        print(f"Loading OpenAI Whisper model '{size}' with 10 SIMD OpenMP CPU threads...")
-        MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
+        device = "cpu"
+        compute_type = "int8"
+        try:
+            import ctranslate2
+            if ctranslate2.get_cuda_device_count() > 0:
+                device = "cuda"
+                compute_type = "float16"
+        except Exception:
+            pass
+
+        if device == "cuda":
+            print(f"Loading OpenAI Whisper model '{size}' on NVIDIA GPU (CUDA, float16)...")
+            MODELS[size] = WhisperModel(size, device="cuda", compute_type="float16")
+        else:
+            print(f"Loading OpenAI Whisper model '{size}' on CPU (int8, 10 SIMD OpenMP threads)...")
+            MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -270,23 +285,39 @@ class ModelPreloaderThread(QThread):
             log_error(f"Model preload error: {e}")
             self.finished_signal.emit(self.model_size, False)
 
-HALLUCINATIONS = [
-    "субтитры", "субтитры создавал", "субтитры добавил", "редактор", 
-    "переводчик", "продолжение следует", "спасибо за просмотр",
-    "до скорой встречи", "подписывайтесь на канал", "ставьте лайки",
-    "сообщество субтитров", "автор субтитров", "корректор", "субтитры:"
+HALLUCINATION_PATTERNS = [
+    r'(?:продолжение следует|продолжение в следующем видео)',
+    r'(?:субтитры создавал|субтитры сделал|субтитры добавил|субтитры|автор субтитров|сообщество субтитров|редактор субтитров)',
+    r'(?:спасибо за просмотр|до скорой встречи|подписывайтесь на канал|ставьте лайки|ставьте лайк)',
+    r'(?:благодарю за внимание|переводчик|корректор)',
 ]
+
+END_HALLUCINATION_REGEX = re.compile(
+    r'[\s.,!?:;\-\(\)]*(' + '|'.join(HALLUCINATION_PATTERNS) + r')[\s.,!?:;\-\(\)]*$',
+    re.IGNORECASE
+)
+START_HALLUCINATION_REGEX = re.compile(
+    r'^[\s.,!?:;\-\(\)]*(' + '|'.join(HALLUCINATION_PATTERNS) + r')[\s.,!?:;\-\(\)]*',
+    re.IGNORECASE
+)
 
 def clean_hallucinated_subtitles(text):
     if not text:
         return ""
     text_clean = text.strip()
-    text_lower = text_clean.lower()
-    for h in HALLUCINATIONS:
-        if text_lower == h or text_lower.startswith(h) or text_lower.endswith(h):
-            if len(text_clean) < 50:
-                print(f"Filtered out Whisper hallucination: '{text_clean}'")
-                return ""
+    
+    old_len = -1
+    while len(text_clean) != old_len and text_clean:
+        old_len = len(text_clean)
+        if START_HALLUCINATION_REGEX.fullmatch(text_clean) or END_HALLUCINATION_REGEX.fullmatch(text_clean):
+            print(f"Filtered out complete Whisper hallucination: '{text_clean}'")
+            return ""
+        m = END_HALLUCINATION_REGEX.search(text_clean)
+        if m:
+            stripped = text_clean[:m.start()].strip()
+            print(f"Trimmed trailing Whisper hallucination '{m.group(0).strip()}' -> remaining: '{stripped}'")
+            text_clean = stripped
+
     return text_clean
 
 class TranscribeThread(QThread):
@@ -445,6 +476,11 @@ class SettingsDialog(QDialog):
         self.autopaste_chk.setChecked(self.cfg.get("autopaste", True))
         form.addRow("📋 Буфер / Вставка:", self.autopaste_chk)
 
+        # Save audio logs checkbox
+        self.savelogs_chk = QCheckBox("Сохранять аудиозаписи диктовки в папку logs/")
+        self.savelogs_chk.setChecked(self.cfg.get("save_audio_logs", True))
+        form.addRow("📁 Логирование аудио:", self.savelogs_chk)
+
         layout.addLayout(form)
 
         save_btn = QPushButton("💾 Сохранить настройки / Save Settings")
@@ -463,6 +499,7 @@ class SettingsDialog(QDialog):
         self.cfg["min_duration_sec"] = self.min_dur_spin.value()
         self.cfg["realtime_mode"] = self.realtime_chk.isChecked()
         self.cfg["autopaste"] = self.autopaste_chk.isChecked()
+        self.cfg["save_audio_logs"] = self.savelogs_chk.isChecked()
         save_config(self.cfg)
 
         # Trigger background model warmup if model changed
@@ -895,6 +932,7 @@ class DictationWidget(QWidget):
         self.is_recording = False
 
         duration, max_rms = self.recorder.get_stats()
+        self.last_duration = duration
         min_dur = self.cfg.get("min_duration_sec", 0.2)
 
         if duration < min_dur:
@@ -968,7 +1006,31 @@ class DictationWidget(QWidget):
             pyperclip.copy(text)
             self.history.insert(0, text)
             self.history_list.insertItem(0, text)
-            
+
+            if self.cfg.get("save_audio_logs", True):
+                try:
+                    logs_dir = os.path.join(APP_DIR, "logs")
+                    os.makedirs(logs_dir, exist_ok=True)
+                    ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    log_wav_path = os.path.join(logs_dir, f"audio_{ts_str}.wav")
+                    if os.path.exists(self.audio_file):
+                        shutil.copy2(self.audio_file, log_wav_path)
+                    
+                    history_file = os.path.join(logs_dir, "dictation_history.jsonl")
+                    log_entry = {
+                        "timestamp": datetime.datetime.now().isoformat(),
+                        "audio_file": log_wav_path,
+                        "duration_sec": getattr(self, "last_duration", 0.0),
+                        "model_size": self.cfg.get("model_size", "turbo"),
+                        "language": self.cfg.get("language", "ru"),
+                        "text": text
+                    }
+                    with open(history_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
+                    print(f"Saved audio log: {log_wav_path}")
+                except Exception as ex:
+                    log_error(f"Error saving audio log: {ex}")
+
             if self.cfg.get("autopaste", True):
                 target = self.target_hwnd if self.target_hwnd else self.last_external_hwnd
                 paste_text_to_window(target, text)
