@@ -56,6 +56,22 @@ def ensure_single_instance():
         log_error(f"Single instance check exception: {e}")
         return None
 
+def get_media_playing_state():
+    try:
+        import asyncio
+        from winsdk.windows.media.control import GlobalSystemMediaTransportControlsSessionManager, GlobalSystemMediaTransportControlsSessionPlaybackStatus
+        async def fetch_state():
+            manager = await GlobalSystemMediaTransportControlsSessionManager.request_async()
+            session = manager.get_current_session()
+            if session:
+                info = session.get_playback_info()
+                return info.playback_status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.PLAYING
+            return False
+        return asyncio.run(fetch_state())
+    except Exception as e:
+        log_error(f"Winsdk media state error: {e}")
+        return False
+
 def toggle_media_play_pause():
     try:
         import keyboard
@@ -994,12 +1010,12 @@ class DictationWidget(QWidget):
         self.is_recording = True
         self.is_transcribing = False
         
+        self.was_media_playing = False
         if self.cfg.get("pause_media_on_record", True):
-            toggle_media_play_pause()
-            self.media_paused_by_app = True
-        else:
-            self.media_paused_by_app = False
-
+            self.was_media_playing = get_media_playing_state()
+            if self.was_media_playing:
+                toggle_media_play_pause()
+        
         self.tray_icon.setIcon(self.rec_icon)
         self.status_btn.setText("🔴 Идет запись...")
         self.status_btn.setStyleSheet("""
@@ -1048,9 +1064,9 @@ class DictationWidget(QWidget):
         self.is_transcribing = False
         self.recorder.cancel()
 
-        if getattr(self, 'media_paused_by_app', False):
+        if getattr(self, 'was_media_playing', False):
             toggle_media_play_pause()
-            self.media_paused_by_app = False
+            self.was_media_playing = False
 
         if self.thread is not None and self.thread.isRunning():
             try:
@@ -1076,9 +1092,9 @@ class DictationWidget(QWidget):
         self.max_recording_timer.stop()
         self.is_recording = False
 
-        if getattr(self, 'media_paused_by_app', False):
+        if getattr(self, 'was_media_playing', False):
             toggle_media_play_pause()
-            self.media_paused_by_app = False
+            self.was_media_playing = False
 
         if self.recorder.stream_error:
             print("Audio stream error detected:", self.recorder.stream_error)
