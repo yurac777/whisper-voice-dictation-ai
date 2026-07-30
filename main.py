@@ -42,12 +42,36 @@ def global_excepthook(exctype, value, tb):
 
 sys.excepthook = global_excepthook
 
+MUTEX_NAME = "Global\\WhisperVoiceDictation_SingleInstance_Mutex_v1"
+
+def ensure_single_instance():
+    try:
+        import win32event, winerror
+        mutex = win32event.CreateMutex(None, False, MUTEX_NAME)
+        if win32api.GetLastError() == winerror.ERROR_ALREADY_EXISTS:
+            print("Whisper Voice AI is already running! Exiting duplicate process.")
+            sys.exit(0)
+        return mutex
+    except Exception as e:
+        log_error(f"Single instance check exception: {e}")
+        return None
+
+def toggle_media_play_pause():
+    try:
+        win32api.keybd_event(win32con.VK_MEDIA_PLAY_PAUSE, 0, win32con.KEYEVENTF_EXTENDEDKEY, 0)
+        time.sleep(0.03)
+        win32api.keybd_event(win32con.VK_MEDIA_PLAY_PAUSE, 0, win32con.KEYEVENTF_EXTENDEDKEY | win32con.KEYEVENTF_KEYUP, 0)
+    except Exception as e:
+        log_error(f"Media play/pause key error: {e}")
+
 INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 DEFAULT_CONFIG = {
     "hotkey": "middle_click",
     "hotkey_mode": "toggle",
     "ignore_fast_middle_click": True,
+    "middle_click_delay_ms": 120,
+    "pause_media_on_record": True,
     "position_mode": "top_center",
     "custom_x": -1,
     "custom_y": -1,
@@ -458,10 +482,23 @@ class SettingsDialog(QDialog):
         form.addRow("🔘 Режим кнопки:", self.mode_combo)
 
         # Ignore fast middle clicks (protect tab closing)
-        self.ignore_fast_chk = QCheckBox("🛡️ Защита колесика (Игнорировать клик <0.25c)")
+        self.ignore_fast_chk = QCheckBox("🛡️ Защита колесика от клика по вкладкам")
         self.ignore_fast_chk.setToolTip("Игнорирует быстрые клики колесиком мыши, чтобы не включать запись при закрытии вкладок в браузере")
         self.ignore_fast_chk.setChecked(self.cfg.get("ignore_fast_middle_click", True))
         form.addRow("🌐 Защита вкладок:", self.ignore_fast_chk)
+
+        # Middle click delay threshold (ms)
+        self.middle_delay_spin = QSpinBox()
+        self.middle_delay_spin.setRange(50, 300)
+        self.middle_delay_spin.setSingleStep(10)
+        self.middle_delay_spin.setSuffix(" мс")
+        self.middle_delay_spin.setValue(self.cfg.get("middle_click_delay_ms", 120))
+        form.addRow("⏱️ Задержка колесика мыши:", self.middle_delay_spin)
+
+        # Pause media during recording
+        self.pause_media_chk = QCheckBox("⏸️ Авто-пауза воспроизведения аудио/музыки при записи")
+        self.pause_media_chk.setChecked(self.cfg.get("pause_media_on_record", True))
+        form.addRow("🎵 Пауза медиа:", self.pause_media_chk)
 
         # Position Mode
         self.pos_combo = QComboBox()
@@ -571,6 +608,8 @@ class SettingsDialog(QDialog):
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
         self.cfg["hotkey_mode"] = self.mode_combo.currentData()
         self.cfg["ignore_fast_middle_click"] = self.ignore_fast_chk.isChecked()
+        self.cfg["middle_click_delay_ms"] = self.middle_delay_spin.value()
+        self.cfg["pause_media_on_record"] = self.pause_media_chk.isChecked()
         self.cfg["position_mode"] = self.pos_combo.currentData()
         self.cfg["model_size"] = new_model
         self.cfg["max_duration_sec"] = self.max_dur_spin.value()
@@ -894,6 +933,7 @@ class DictationWidget(QWidget):
         hk = self.cfg.get("hotkey", "middle_click")
         hk_mode = self.cfg.get("hotkey_mode", "toggle")
         ignore_fast = self.cfg.get("ignore_fast_middle_click", True)
+        delay_sec = self.cfg.get("middle_click_delay_ms", 120) / 1000.0
 
         self.middle_press_time = 0.0
 
@@ -906,7 +946,7 @@ class DictationWidget(QWidget):
                     if self.is_recording:
                         self.toggle_signal.emit()
                     else:
-                        if ignore_fast and press_duration < 0.25:
+                        if ignore_fast and press_duration < delay_sec:
                             # Ignored quick middle-click (e.g. closing browser tabs)
                             pass
                         else:
@@ -954,6 +994,13 @@ class DictationWidget(QWidget):
         self.reposition_window()
         self.is_recording = True
         self.is_transcribing = False
+        
+        if self.cfg.get("pause_media_on_record", True):
+            toggle_media_play_pause()
+            self.media_paused_by_app = True
+        else:
+            self.media_paused_by_app = False
+
         self.tray_icon.setIcon(self.rec_icon)
         self.status_btn.setText("🔴 Идет запись...")
         self.status_btn.setStyleSheet("""
@@ -1002,6 +1049,10 @@ class DictationWidget(QWidget):
         self.is_transcribing = False
         self.recorder.cancel()
 
+        if getattr(self, 'media_paused_by_app', False):
+            toggle_media_play_pause()
+            self.media_paused_by_app = False
+
         if self.thread is not None and self.thread.isRunning():
             try:
                 self.thread.terminate()
@@ -1025,6 +1076,10 @@ class DictationWidget(QWidget):
         self.stream_timer.stop()
         self.max_recording_timer.stop()
         self.is_recording = False
+
+        if getattr(self, 'media_paused_by_app', False):
+            toggle_media_play_pause()
+            self.media_paused_by_app = False
 
         if self.recorder.stream_error:
             print("Audio stream error detected:", self.recorder.stream_error)
@@ -1168,8 +1223,9 @@ class DictationWidget(QWidget):
                     log_error(f"Error saving audio log: {ex}")
 
             if self.cfg.get("autopaste", True):
-                target = self.target_hwnd if self.target_hwnd else self.last_external_hwnd
-                paste_text_to_window(target, text)
+                if not self.cfg.get("realtime_mode", False):
+                    target = self.target_hwnd if self.target_hwnd else self.last_external_hwnd
+                    paste_text_to_window(target, text)
                 self.status_btn.setText("🟢 Вставлено!")
             else:
                 self.status_btn.setText("📋 В буфере!")
@@ -1216,6 +1272,7 @@ class DictationWidget(QWidget):
             save_config(self.cfg)
 
 if __name__ == "__main__":
+    _single_instance_mutex = ensure_single_instance()
     app = QApplication(sys.argv)
     widget = DictationWidget()
     widget.show()

@@ -10,6 +10,12 @@ import os
 import time
 import glob
 import json
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception: pass
+
 from main import get_whisper_model, clean_hallucinated_subtitles, INITIAL_PROMPT
 
 def benchmark_audio_file(wav_path, models=None):
@@ -87,10 +93,12 @@ if __name__ == "__main__":
     else:
         # Check logs directory
         logs_dir = os.path.join(os.path.dirname(__file__), "logs")
-        wav_files = sorted(glob.glob(os.path.join(logs_dir, "*.wav")), reverse=True)
+        wav_files = sorted(glob.glob(os.path.join(logs_dir, "**", "*.wav"), recursive=True), reverse=True)
+        if not wav_files:
+            wav_files = sorted(glob.glob(os.path.join(logs_dir, "*.wav")), reverse=True)
         if wav_files:
-            print(f"Found {len(wav_files)} recorded dictation logs in '{logs_dir}'. Testing the latest recording...")
-            benchmark_audio_file(wav_files[0])
+            print(f"Found {len(wav_files)} recorded dictation logs in '{logs_dir}'. Testing the latest recording: {wav_files[0]}")
+            benchmark_audio_file(wav_files[0], models=["small", "turbo"])
         else:
             print(f"No WAV files found in '{logs_dir}'.")
             print("Usage: python test_models.py <path_to_audio.wav>")

@@ -2,6 +2,8 @@
   "hotkey": "middle_click",
   "hotkey_mode": "toggle",
   "ignore_fast_middle_click": true,
+  "middle_click_delay_ms": 120,
+  "pause_media_on_record": true,
   "position_mode": "top_center",
   "custom_x": -1,
   "custom_y": -1,
