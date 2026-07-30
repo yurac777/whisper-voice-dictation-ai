@@ -58,9 +58,8 @@ def ensure_single_instance():
 
 def toggle_media_play_pause():
     try:
-        win32api.keybd_event(win32con.VK_MEDIA_PLAY_PAUSE, 0, win32con.KEYEVENTF_EXTENDEDKEY, 0)
-        time.sleep(0.03)
-        win32api.keybd_event(win32con.VK_MEDIA_PLAY_PAUSE, 0, win32con.KEYEVENTF_EXTENDEDKEY | win32con.KEYEVENTF_KEYUP, 0)
+        import keyboard
+        keyboard.send('play/pause media')
     except Exception as e:
         log_error(f"Media play/pause key error: {e}")
 
