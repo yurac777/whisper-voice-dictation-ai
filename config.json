@@ -1,5 +1,7 @@
 {
   "hotkey": "middle_click",
+  "hotkey_mode": "toggle",
+  "ignore_fast_middle_click": true,
   "position_mode": "top_center",
   "custom_x": -1,
   "custom_y": -1,
@@ -9,7 +11,8 @@
   "language": "ru",
   "max_duration_sec": 60,
   "min_duration_sec": 0.2,
-  "silence_rms_threshold": 0.0001,
-  "save_audio_logs": true
+  "check_silence": true,
+  "silence_rms_threshold": 0.00005,
+  "save_audio_logs": true,
+  "save_audio_dir": "logs/recordings"
 }
-

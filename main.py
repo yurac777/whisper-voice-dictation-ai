@@ -2,9 +2,11 @@
 import sys, os, time, wave, threading, json, subprocess, traceback, re, shutil, datetime
 
 # Optimize OpenMP thread allocation to prevent C++ thread stack overflow
-os.environ["OMP_NUM_THREADS"] = "10"
-os.environ["MKL_NUM_THREADS"] = "10"
-os.environ["OPENBLAS_NUM_THREADS"] = "10"
+cpu_cnt = os.cpu_count() or 4
+thread_limit = str(min(4, cpu_cnt))
+os.environ["OMP_NUM_THREADS"] = thread_limit
+os.environ["MKL_NUM_THREADS"] = thread_limit
+os.environ["OPENBLAS_NUM_THREADS"] = thread_limit
 
 import sounddevice as sd
 import numpy as np
@@ -16,7 +18,7 @@ import keyboard
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QPoint
 from PyQt6.QtWidgets import (QApplication, QWidget, QPushButton, QHBoxLayout, 
                              QVBoxLayout, QLabel, QListWidget, QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox,
-                             QSystemTrayIcon, QMenu, QDialog, QFormLayout, QGroupBox)
+                             QSystemTrayIcon, QMenu, QDialog, QFormLayout, QGroupBox, QLineEdit, QFileDialog)
 from PyQt6.QtGui import QFont, QIcon, QAction, QColor, QPixmap, QPainter, QBrush, QPen, QCursor
 
 from faster_whisper import WhisperModel
@@ -33,10 +35,19 @@ def log_error(msg):
             f.write(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
     except Exception: pass
 
+def global_excepthook(exctype, value, tb):
+    err_msg = "".join(traceback.format_exception(exctype, value, tb))
+    log_error(f"UNCAUGHT EXCEPTION:\n{err_msg}")
+    sys.__excepthook__(exctype, value, tb)
+
+sys.excepthook = global_excepthook
+
 INITIAL_PROMPT = "Привет! Это диктовка: GitHub, Python, Docker, API, Telegram, Wi-Fi, Windows, ChatGPT, YouTube, OpenWrt, SSD."
 
 DEFAULT_CONFIG = {
     "hotkey": "middle_click",
+    "hotkey_mode": "toggle",
+    "ignore_fast_middle_click": True,
     "position_mode": "top_center",
     "custom_x": -1,
     "custom_y": -1,
@@ -46,8 +57,10 @@ DEFAULT_CONFIG = {
     "language": "ru",
     "max_duration_sec": 120,
     "min_duration_sec": 0.2,
-    "silence_rms_threshold": 0.0001,
-    "save_audio_logs": True
+    "check_silence": True,
+    "silence_rms_threshold": 0.00005,
+    "save_audio_logs": True,
+    "save_audio_dir": "logs/recordings"
 }
 
 LANGUAGES = [
@@ -153,12 +166,13 @@ def get_whisper_model(size="turbo"):
         except Exception:
             pass
 
+        thread_cnt = min(4, os.cpu_count() or 4)
         if device == "cuda":
             print(f"Loading OpenAI Whisper model '{size}' on NVIDIA GPU (CUDA, float16)...")
             MODELS[size] = WhisperModel(size, device="cuda", compute_type="float16")
         else:
-            print(f"Loading OpenAI Whisper model '{size}' on CPU (int8, 10 SIMD OpenMP threads)...")
-            MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=10)
+            print(f"Loading OpenAI Whisper model '{size}' on CPU (int8, {thread_cnt} OpenMP threads)...")
+            MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=thread_cnt)
         print(f"Model '{size}' loaded successfully!")
     return MODELS[size]
 
@@ -207,6 +221,8 @@ class AudioRecorder:
         self.audio_data = []
         self.record_thread = None
         self.start_time = 0
+        self.stream_error = None
+        self.last_rms = 0.0
 
     def _record_loop(self):
         try:
@@ -215,11 +231,15 @@ class AudioRecorder:
                     data, _ = stream.read(1024)
                     if self.recording and len(data) > 0:
                         self.audio_data.append(data.copy())
+                        self.last_rms = float(np.sqrt(np.mean(data**2)))
         except Exception as e:
+            self.stream_error = str(e)
             log_error(f"Recording loop error: {e}")
 
     def start(self):
         self.audio_data = []
+        self.stream_error = None
+        self.last_rms = 0.0
         self.start_time = time.time()
         self.recording = True
         self.record_thread = threading.Thread(target=self._record_loop, daemon=True)
@@ -227,11 +247,16 @@ class AudioRecorder:
 
     def get_stats(self):
         if not self.audio_data:
-            return 0.0, 0.0
-        data = np.concatenate(self.audio_data, axis=0)
-        duration = len(data) / float(self.sample_rate)
-        max_rms = float(np.sqrt(np.mean(data**2)))
-        return duration, max_rms
+            return 0.0, 0.0, 0.0
+        try:
+            data = np.concatenate(self.audio_data, axis=0)
+            duration = len(data) / float(self.sample_rate)
+            mean_rms = float(np.sqrt(np.mean(data**2)))
+            max_peak = float(np.max(np.abs(data)))
+            return duration, mean_rms, max_peak
+        except Exception as e:
+            log_error(f"get_stats error: {e}")
+            return 0.0, 0.0, 0.0
 
     def get_current_audio_file(self, out_filename):
         if not self.audio_data:
@@ -372,7 +397,7 @@ class SettingsDialog(QDialog):
         self.cfg = cfg
         self.parent_widget = parent_widget
         self.setWindowTitle("⚙️ Settings / Настройки Whisper Voice AI")
-        self.setFixedWidth(450)
+        self.setFixedWidth(480)
         self.setStyleSheet("""
             QDialog {
                 background-color: #1e1e2e;
@@ -382,7 +407,7 @@ class SettingsDialog(QDialog):
                 color: #cdd6f4;
                 font-size: 12px;
             }
-            QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox {
+            QComboBox, QCheckBox, QSpinBox, QDoubleSpinBox, QLineEdit {
                 background-color: #313244;
                 color: #cdd6f4;
                 border: 1px solid #45475a;
@@ -423,6 +448,20 @@ class SettingsDialog(QDialog):
         idx = self.hotkey_combo.findData(self.cfg.get("hotkey", "middle_click"))
         if idx >= 0: self.hotkey_combo.setCurrentIndex(idx)
         form.addRow("⌨️ Кнопка записи:", self.hotkey_combo)
+
+        # Hotkey Mode (Toggle vs Hold)
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Переключение (Клик для нач/конца)", "toggle")
+        self.mode_combo.addItem("Удерживание (Hold to talk)", "hold")
+        idx_hm = self.mode_combo.findData(self.cfg.get("hotkey_mode", "toggle"))
+        if idx_hm >= 0: self.mode_combo.setCurrentIndex(idx_hm)
+        form.addRow("🔘 Режим кнопки:", self.mode_combo)
+
+        # Ignore fast middle clicks (protect tab closing)
+        self.ignore_fast_chk = QCheckBox("🛡️ Защита колесика (Игнорировать клик <0.25c)")
+        self.ignore_fast_chk.setToolTip("Игнорирует быстрые клики колесиком мыши, чтобы не включать запись при закрытии вкладок в браузере")
+        self.ignore_fast_chk.setChecked(self.cfg.get("ignore_fast_middle_click", True))
+        form.addRow("🌐 Защита вкладок:", self.ignore_fast_chk)
 
         # Position Mode
         self.pos_combo = QComboBox()
@@ -476,10 +515,31 @@ class SettingsDialog(QDialog):
         self.autopaste_chk.setChecked(self.cfg.get("autopaste", True))
         form.addRow("📋 Буфер / Вставка:", self.autopaste_chk)
 
+        # Silence Check toggle
+        self.check_silence_chk = QCheckBox("⚠️ Проверять отключенный микрофон (детекция тишины)")
+        self.check_silence_chk.setChecked(self.cfg.get("check_silence", True))
+        form.addRow("🎙️ Детекция тишины:", self.check_silence_chk)
+
         # Save audio logs checkbox
-        self.savelogs_chk = QCheckBox("Сохранять аудиозаписи диктовки в папку logs/")
+        self.savelogs_chk = QCheckBox("Сохранять аудиозаписи (.wav + .txt) для обучения ИИ")
         self.savelogs_chk.setChecked(self.cfg.get("save_audio_logs", True))
-        form.addRow("📁 Логирование аудио:", self.savelogs_chk)
+        form.addRow("📁 Локальное сохранение:", self.savelogs_chk)
+
+        # Save Dir widget row
+        dir_box = QHBoxLayout()
+        self.save_dir_edit = QLineEdit(self.cfg.get("save_audio_dir", "logs/recordings"))
+        dir_box.addWidget(self.save_dir_edit)
+        
+        browse_btn = QPushButton("Обзор...")
+        browse_btn.setStyleSheet("padding: 4px 8px; font-size: 11px;")
+        browse_btn.clicked.connect(self.browse_save_dir)
+        dir_box.addWidget(browse_btn)
+        form.addRow("📁 Папка записей:", dir_box)
+
+        open_folder_btn = QPushButton("📂 Открыть папку с записями в Проводнике")
+        open_folder_btn.setStyleSheet("background-color: #313244; color: #89b4fa; border: 1px solid #45475a; padding: 6px;")
+        open_folder_btn.clicked.connect(self.open_save_dir)
+        form.addRow("", open_folder_btn)
 
         layout.addLayout(form)
 
@@ -487,19 +547,39 @@ class SettingsDialog(QDialog):
         save_btn.clicked.connect(self.save_and_close)
         layout.addWidget(save_btn)
 
+    def browse_save_dir(self):
+        curr = self.save_dir_edit.text().strip()
+        start_dir = curr if os.path.exists(curr) else APP_DIR
+        chosen = QFileDialog.getExistingDirectory(self, "Выберите папку для сохранения аудиозаписей", start_dir)
+        if chosen:
+            self.save_dir_edit.setText(chosen)
+
+    def open_save_dir(self):
+        raw = self.save_dir_edit.text().strip()
+        target = raw if os.path.isabs(raw) else os.path.join(APP_DIR, raw)
+        os.makedirs(target, exist_ok=True)
+        try:
+            os.startfile(target)
+        except Exception as e:
+            log_error(f"Open dir error: {e}")
+
     def save_and_close(self):
         new_model = self.model_combo.currentData()
         old_model = self.cfg.get("model_size", "turbo")
 
         self.cfg["language"] = self.lang_combo.currentData()
         self.cfg["hotkey"] = self.hotkey_combo.currentData()
+        self.cfg["hotkey_mode"] = self.mode_combo.currentData()
+        self.cfg["ignore_fast_middle_click"] = self.ignore_fast_chk.isChecked()
         self.cfg["position_mode"] = self.pos_combo.currentData()
         self.cfg["model_size"] = new_model
         self.cfg["max_duration_sec"] = self.max_dur_spin.value()
         self.cfg["min_duration_sec"] = self.min_dur_spin.value()
         self.cfg["realtime_mode"] = self.realtime_chk.isChecked()
         self.cfg["autopaste"] = self.autopaste_chk.isChecked()
+        self.cfg["check_silence"] = self.check_silence_chk.isChecked()
         self.cfg["save_audio_logs"] = self.savelogs_chk.isChecked()
+        self.cfg["save_audio_dir"] = self.save_dir_edit.text().strip() or "logs/recordings"
         save_config(self.cfg)
 
         # Trigger background model warmup if model changed
@@ -812,10 +892,25 @@ class DictationWidget(QWidget):
             except Exception: pass
 
         hk = self.cfg.get("hotkey", "middle_click")
+        hk_mode = self.cfg.get("hotkey_mode", "toggle")
+        ignore_fast = self.cfg.get("ignore_fast_middle_click", True)
+
+        self.middle_press_time = 0.0
 
         def on_click(x, y, button, pressed):
-            if hk == "middle_click" and button == mouse.Button.middle and pressed:
-                self.toggle_signal.emit()
+            if hk == "middle_click" and button == mouse.Button.middle:
+                if pressed:
+                    self.middle_press_time = time.time()
+                else:
+                    press_duration = time.time() - getattr(self, 'middle_press_time', 0.0)
+                    if self.is_recording:
+                        self.toggle_signal.emit()
+                    else:
+                        if ignore_fast and press_duration < 0.25:
+                            # Ignored quick middle-click (e.g. closing browser tabs)
+                            pass
+                        else:
+                            self.toggle_signal.emit()
 
         self.mouse_listener = mouse.Listener(on_click=on_click)
         self.mouse_listener.start()
@@ -931,15 +1026,49 @@ class DictationWidget(QWidget):
         self.max_recording_timer.stop()
         self.is_recording = False
 
-        duration, max_rms = self.recorder.get_stats()
+        if self.recorder.stream_error:
+            print("Audio stream error detected:", self.recorder.stream_error)
+            self.recorder.cancel()
+            self.status_btn.setText("⚠️ Ошибка микрофона!")
+            self.status_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #f38ba8;
+                    color: #11111b;
+                    border: 1px solid #f38ba8;
+                    border-radius: 14px;
+                    padding: 0px 14px;
+                }
+            """)
+            QTimer.singleShot(2500, self.reset_btn)
+            return
+
+        duration, mean_rms, max_peak = self.recorder.get_stats()
         self.last_duration = duration
         min_dur = self.cfg.get("min_duration_sec", 0.2)
+        silence_thresh = self.cfg.get("silence_rms_threshold", 0.00005)
+        check_silence = self.cfg.get("check_silence", True)
 
         if duration < min_dur:
             print(f"Accidental click detected ({duration:.2f}s < {min_dur}s). Cancelling...")
             self.recorder.cancel()
             self.status_btn.setText("⚡ Слишком коротко")
             QTimer.singleShot(1000, self.reset_btn)
+            return
+
+        if check_silence and max_peak < silence_thresh:
+            print(f"Silence detected (max peak {max_peak:.6f} < {silence_thresh}). Microphone muted or off.")
+            self.recorder.cancel()
+            self.status_btn.setText("⚠️ Микрофон молчит / Нет звука")
+            self.status_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #f38ba8;
+                    color: #11111b;
+                    border: 1px solid #f38ba8;
+                    border-radius: 14px;
+                    padding: 0px 14px;
+                }
+            """)
+            QTimer.singleShot(2500, self.reset_btn)
             return
 
         self.is_transcribing = True
@@ -1009,17 +1138,24 @@ class DictationWidget(QWidget):
 
             if self.cfg.get("save_audio_logs", True):
                 try:
-                    logs_dir = os.path.join(APP_DIR, "logs")
-                    os.makedirs(logs_dir, exist_ok=True)
+                    rel_dir = self.cfg.get("save_audio_dir", "logs/recordings")
+                    save_dir = rel_dir if os.path.isabs(rel_dir) else os.path.join(APP_DIR, rel_dir)
+                    os.makedirs(save_dir, exist_ok=True)
+
                     ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                    log_wav_path = os.path.join(logs_dir, f"audio_{ts_str}.wav")
+                    log_wav_path = os.path.join(save_dir, f"audio_{ts_str}.wav")
+                    log_txt_path = os.path.join(save_dir, f"audio_{ts_str}.txt")
+
                     if os.path.exists(self.audio_file):
                         shutil.copy2(self.audio_file, log_wav_path)
-                    
-                    history_file = os.path.join(logs_dir, "dictation_history.jsonl")
+                        with open(log_txt_path, "w", encoding="utf-8") as tf:
+                            tf.write(text + "\n")
+
+                    history_file = os.path.join(save_dir, "dictation_history.jsonl")
                     log_entry = {
                         "timestamp": datetime.datetime.now().isoformat(),
                         "audio_file": log_wav_path,
+                        "transcript_file": log_txt_path,
                         "duration_sec": getattr(self, "last_duration", 0.0),
                         "model_size": self.cfg.get("model_size", "turbo"),
                         "language": self.cfg.get("language", "ru"),
@@ -1027,7 +1163,7 @@ class DictationWidget(QWidget):
                     }
                     with open(history_file, "a", encoding="utf-8") as f:
                         f.write(json.dumps(log_entry, ensure_ascii=False) + "\n")
-                    print(f"Saved audio log: {log_wav_path}")
+                    print(f"Saved audio & transcript dataset: {log_wav_path}")
                 except Exception as ex:
                     log_error(f"Error saving audio log: {ex}")
 
