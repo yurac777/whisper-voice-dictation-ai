@@ -780,6 +780,25 @@ class DictationWidget(QWidget):
         self.menu_btn.clicked.connect(self.open_settings_dialog)
         pill_layout.addWidget(self.menu_btn)
 
+        self.minimize_btn = QPushButton("➖")
+        self.minimize_btn.setFixedSize(30, 30)
+        self.minimize_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+        self.minimize_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2a2b3d;
+                color: #89b4fa;
+                border: 1px solid #45475a;
+                border-radius: 14px;
+            }
+            QPushButton:hover {
+                background-color: #89b4fa;
+                color: #11111b;
+            }
+        """)
+        self.minimize_btn.setToolTip("Свернуть в трей / Minimize to Tray")
+        self.minimize_btn.clicked.connect(self.hide_to_tray)
+        pill_layout.addWidget(self.minimize_btn)
+
         self.cancel_btn = QPushButton("❌")
         self.cancel_btn.setFixedSize(30, 30)
         self.cancel_btn.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
@@ -855,7 +874,7 @@ class DictationWidget(QWidget):
         self.history_drawer.hide()
         outer_layout.addWidget(self.history_drawer)
 
-        self.setFixedWidth(320)
+        self.setFixedWidth(360)
         self.reposition_window()
 
     def set_btn_ready_style(self):
@@ -932,7 +951,22 @@ class DictationWidget(QWidget):
 
         self.tray_icon.setContextMenu(tray_menu)
         self.tray_icon.setToolTip("Whisper AI Multilingual Dictation")
+        self.tray_icon.activated.connect(self.on_tray_icon_activated)
         self.tray_icon.show()
+
+    def hide_to_tray(self):
+        self.hide()
+        if hasattr(self, 'tray_icon') and self.tray_icon and self.tray_icon.isVisible():
+            self.tray_icon.showMessage(
+                "Whisper Voice AI",
+                "Приложение свернуто в трей. Нажмите на иконку в трее, чтобы развернуть.",
+                QSystemTrayIcon.MessageIcon.Information,
+                2000
+            )
+
+    def on_tray_icon_activated(self, reason):
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self.toggle_visibility()
 
     def toggle_visibility(self):
         if self.isVisible():
