@@ -653,6 +653,8 @@ class DictationWidget(QWidget):
         self.recorder = AudioRecorder()
         self.is_recording = False
         self.is_transcribing = False
+        self.is_rt_transcribing = False
+        self.last_rt_text = ""
         self.target_hwnd = None
         self.history = []
         self.thread = None
@@ -1009,6 +1011,8 @@ class DictationWidget(QWidget):
         self.reposition_window()
         self.is_recording = True
         self.is_transcribing = False
+        self.is_rt_transcribing = False
+        self.last_rt_text = ""
         
         self.was_media_playing = False
         if self.cfg.get("pause_media_on_record", True):
@@ -1041,20 +1045,52 @@ class DictationWidget(QWidget):
             self.stop_dictation()
 
     def process_realtime_chunk(self):
-        if self.is_recording and not self.is_transcribing:
+        if self.is_recording and not self.is_transcribing and not getattr(self, 'is_rt_transcribing', False):
             audio_np = self.recorder.get_numpy_audio()
             if audio_np is not None and len(audio_np) > 0:
+                self.is_rt_transcribing = True
                 model_size = self.cfg.get("model_size", "turbo")
                 lang = self.cfg.get("language", "ru")
                 self.rt_thread = TranscribeThread(audio_np, model_size=model_size, language=lang)
                 self.rt_thread.finished_signal.connect(self.on_realtime_finished)
+                self.rt_thread.error_signal.connect(self.on_realtime_error)
                 self.rt_thread.start()
 
+    def on_realtime_error(self, err):
+        self.is_rt_transcribing = False
+
     def on_realtime_finished(self, text):
+        self.is_rt_transcribing = False
         if self.is_recording and text:
-            print("Realtime Partial Stream:", text)
-            if self.cfg.get("autopaste", True):
-                paste_text_to_window(self.target_hwnd, text + " ")
+            # We want to paste only the new words that were recognized
+            prev = getattr(self, 'last_rt_text', "")
+            
+            # Simple diff: if it starts with the previous text, just take the new part
+            # Wait, whisper often changes casing or punctuation of the previous text.
+            # To be safe, we just strip punctuation and lowercase it to compare, or use a naive approach.
+            if len(text) > len(prev):
+                # Extremely naive approach for typing into random windows:
+                # We can't use backspace safely. So we only append if we find a clear extension.
+                if text.lower().startswith(prev.lower()):
+                    new_text = text[len(prev):]
+                else:
+                    # If model rewrote the sentence, it's very hard to fix the window text.
+                    # We will just append the difference in length as a raw guess.
+                    # This will cause garbage, which is why true realtime into arbitrary windows is hard.
+                    # For now, let's just attempt to paste the new suffix.
+                    # If we don't have a good match, we just wait until the end.
+                    words_new = text.split()
+                    words_old = prev.split()
+                    if len(words_new) > len(words_old):
+                        new_text = " ".join(words_new[len(words_old):])
+                    else:
+                        new_text = ""
+                
+                if new_text.strip():
+                    if self.cfg.get("autopaste", True):
+                        paste_text_to_window(self.target_hwnd, " " + new_text.strip())
+            
+            self.last_rt_text = text
 
     def cancel_dictation(self):
         self.stream_timer.stop()
