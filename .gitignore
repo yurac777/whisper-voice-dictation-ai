@@ -16,3 +16,8 @@ Desktop.ini
 build/
 dist/
 *.spec
+
+# Application logs & recordings
+logs/
+*.jsonl
+*.log

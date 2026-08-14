@@ -955,6 +955,8 @@ class DictationWidget(QWidget):
         self.tray_icon.show()
 
     def hide_to_tray(self):
+        if self.is_recording:
+            self.cancel_dictation()
         self.hide()
         if hasattr(self, 'tray_icon') and self.tray_icon and self.tray_icon.isVisible():
             self.tray_icon.showMessage(
@@ -963,6 +965,11 @@ class DictationWidget(QWidget):
                 QSystemTrayIcon.MessageIcon.Information,
                 2000
             )
+
+    def hideEvent(self, event):
+        if self.is_recording:
+            self.cancel_dictation()
+        super().hideEvent(event)
 
     def on_tray_icon_activated(self, reason):
         if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
@@ -989,6 +996,8 @@ class DictationWidget(QWidget):
         self.middle_press_time = 0.0
 
         def on_click(x, y, button, pressed):
+            if not self.isVisible():
+                return
             if hk == "middle_click" and button == mouse.Button.middle:
                 if pressed:
                     self.middle_press_time = time.time()
@@ -1006,19 +1015,27 @@ class DictationWidget(QWidget):
         self.mouse_listener = mouse.Listener(on_click=on_click)
         self.mouse_listener.start()
 
+        def safe_toggle():
+            if self.isVisible():
+                self.toggle_signal.emit()
+
+        def safe_cancel():
+            if self.isVisible() and self.is_recording:
+                self.cancel_signal.emit()
+
         try:
             keyboard.unhook_all()
-            keyboard.add_hotkey('esc', lambda: self.cancel_signal.emit())
-            keyboard.add_hotkey('pause', lambda: convert_current_selection_layout())
+            keyboard.add_hotkey('esc', safe_cancel)
+            keyboard.add_hotkey('pause', lambda: convert_current_selection_layout() if self.isVisible() else None)
 
             if hk == "right_alt":
-                keyboard.add_hotkey('right alt', lambda: self.toggle_signal.emit())
+                keyboard.add_hotkey('right alt', safe_toggle)
             elif hk == "right_ctrl":
-                keyboard.add_hotkey('right ctrl', lambda: self.toggle_signal.emit())
+                keyboard.add_hotkey('right ctrl', safe_toggle)
             elif hk == "f9":
-                keyboard.add_hotkey('f9', lambda: self.toggle_signal.emit())
+                keyboard.add_hotkey('f9', safe_toggle)
             elif hk == "f10":
-                keyboard.add_hotkey('f10', lambda: self.toggle_signal.emit())
+                keyboard.add_hotkey('f10', safe_toggle)
         except Exception as e:
             print("Hotkey listener error:", e)
 
@@ -1031,6 +1048,8 @@ class DictationWidget(QWidget):
             pass
 
     def toggle_recording(self):
+        if not self.isVisible():
+            return
         if not self.is_recording and not self.is_transcribing:
             fg = win32gui.GetForegroundWindow()
             if fg and fg != int(self.winId()):
