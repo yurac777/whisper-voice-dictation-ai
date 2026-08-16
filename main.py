@@ -533,6 +533,8 @@ class SettingsDialog(QDialog):
 
         # Model Selector with Automatic Warmup Indicator
         self.model_combo = QComboBox()
+        if os.path.exists("models/faster-whisper-custom-voice"):
+            self.model_combo.addItem("🎙️ Мой голос (Custom Voice LoRA)", "models/faster-whisper-custom-voice")
         self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Гипер-скорость ~0.3s]", "turbo")
         self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
@@ -704,7 +706,8 @@ class DictationWidget(QWidget):
     def start_model_preloader(self, model_size):
         if model_size in MODELS:
             return
-        self.status_btn.setText(f"⏳ Загрузка {model_size}...")
+        disp_name = "Мой голос" if "custom-voice" in model_size else model_size
+        self.status_btn.setText(f"⏳ Загрузка {disp_name}...")
         self.status_btn.setStyleSheet("""
             QPushButton {
                 background-color: #f9e2af;
@@ -719,8 +722,9 @@ class DictationWidget(QWidget):
         self.preloader_thread.start()
 
     def on_model_preloaded(self, model_size, success):
+        disp_name = "МОЙ ГОЛОС" if "custom-voice" in model_size else model_size.upper()
         if success:
-            self.status_btn.setText(f"✅ {model_size.upper()} Готова!")
+            self.status_btn.setText(f"✅ {disp_name} Готова!")
             self.status_btn.setStyleSheet("""
                 QPushButton {
                     background-color: #a6e3a1;
@@ -731,7 +735,7 @@ class DictationWidget(QWidget):
                 }
             """)
         else:
-            self.status_btn.setText(f"⚠️ Ошибка {model_size}")
+            self.status_btn.setText(f"⚠️ Ошибка {disp_name}")
         QTimer.singleShot(1500, self.reset_btn)
 
     def init_ui(self):

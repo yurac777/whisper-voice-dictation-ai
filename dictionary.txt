@@ -1,4 +1,5 @@
 # Словарь терминов и англицизмов для Whisper AI (добавляйте свои слова по 1 на строку или через запятую)
+GT, VTGC, Litrix, WPS, Google App, SEO, TikTok, iAndex, Marketplace, TG,
 Whisper, OpenAI, Python, Docker, API, Telegram, GitHub, Wi-Fi, Windows, ChatGPT, YouTube, Bambu Lab,
 OpenWrt, SSD, RAM, GPU, CPU, SSH, VLESS, PyTorch, Next.js, React, Google, Apple, Microsoft, iOS,
 Android, Linux, Online, Web, Figma, Notion, Zoom, Discord, Slack, VS Code, JavaScript, TypeScript,
