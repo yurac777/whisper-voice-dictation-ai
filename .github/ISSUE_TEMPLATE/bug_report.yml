@@ -1,0 +1,54 @@
+name: "🐛 Bug Report"
+description: "File an issue or runtime bug report for Whisper Voice Dictation AI"
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the form below.
+  - type: textarea
+    id: description
+    attributes:
+      label: "Describe the bug"
+      description: "A clear and concise description of what the bug is."
+      placeholder: "When clicking the record button, the following happens..."
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: "Operating System"
+      options:
+        - "Windows 11 (64-bit)"
+        - "Windows 10 (64-bit)"
+        - "Linux / macOS"
+    validations:
+      required: true
+  - type: dropdown
+    id: gpu
+    attributes:
+      label: "GPU / Hardware"
+      options:
+        - "NVIDIA GPU (CUDA)"
+        - "AMD Radeon (DirectML)"
+        - "Intel Arc / Iris Xe"
+        - "CPU only"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: "Steps to Reproduce"
+      description: "Step-by-step instructions to reproduce the issue."
+      placeholder: "1. Launch WhisperVoiceDictation.exe\n2. Press hotkey\n3. Notice that..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: "Relevant Log Output (`app.log`)"
+      description: "Paste any traceback or error messages from `app.log` if available."
+      render: shell
+    validations:
+      required: false

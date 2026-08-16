@@ -207,9 +207,14 @@ def get_whisper_model(size="turbo"):
 
         thread_cnt = min(4, os.cpu_count() or 4)
         if device == "cuda":
-            print(f"Loading OpenAI Whisper model '{size}' on NVIDIA GPU (CUDA, float16)...")
-            MODELS[size] = WhisperModel(size, device="cuda", compute_type="float16")
-        else:
+            try:
+                print(f"Loading OpenAI Whisper model '{size}' on NVIDIA GPU (CUDA, float16)...")
+                MODELS[size] = WhisperModel(size, device="cuda", compute_type="float16")
+            except Exception as e:
+                log_error(f"CUDA initialization failed, falling back to CPU: {e}")
+                print(f"CUDA initialization failed, falling back to CPU: {e}")
+                device = "cpu"
+        if device == "cpu":
             print(f"Loading OpenAI Whisper model '{size}' on CPU (int8, {thread_cnt} OpenMP threads)...")
             MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=thread_cnt)
         print(f"Model '{size}' loaded successfully!")
@@ -1376,8 +1381,30 @@ class DictationWidget(QWidget):
             save_config(self.cfg)
 
 if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="🎙️ Whisper Voice Dictation AI - Ultra-fast 100% Offline Speech-to-Text Widget",
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument("--minimized", action="store_true", help="Start minimized directly to system tray")
+    parser.add_argument("--model", type=str, default=None, help="Override Whisper model size (turbo, small, medium, large-v3)")
+    parser.add_argument("--lang", type=str, default=None, help="Override recognition language (e.g. ru, en, auto)")
+    parser.add_argument("--version", action="version", version="Whisper Voice Dictation AI v2.4.0")
+    
+    args, unknown = parser.parse_known_args()
+
     _single_instance_mutex = ensure_single_instance()
     app = QApplication(sys.argv)
     widget = DictationWidget()
-    widget.show()
+    
+    if args.model:
+        widget.cfg["model_size"] = args.model
+    if args.lang:
+        widget.cfg["language"] = args.lang
+
+    if args.minimized:
+        widget.hide()
+    else:
+        widget.show()
+        
     sys.exit(app.exec())

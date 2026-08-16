@@ -6,6 +6,9 @@ on:
       - 'v*'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Whisper Voice Dictation EXE
@@ -29,7 +32,7 @@ jobs:
 
       - name: 🛠️ Build Executable with PyInstaller
         run: |
-          pyinstaller --noconsole --onefile --icon=whisper_icon.ico --name=WhisperVoiceDictation --collect-all ctranslate2 --collect-all faster_whisper --collect-all sounddevice --collect-all cffi main.py
+          pyinstaller --noconsole --onefile --icon=whisper_icon.ico --name=WhisperVoiceDictation --collect-all ctranslate2 --collect-all faster_whisper --collect-all sounddevice --collect-all cffi --collect-all onnxruntime main.py
 
       - name: 📦 Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -38,3 +41,4 @@ jobs:
           files: dist/WhisperVoiceDictation.exe
           body_path: CHANGELOG.md
           token: ${{ secrets.GITHUB_TOKEN }}
+
