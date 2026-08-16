@@ -194,7 +194,11 @@ def convert_current_selection_layout():
 
 def get_whisper_model(size="turbo"):
     global MODELS
-    if size not in MODELS:
+    model_path = size
+    if not os.path.exists(model_path) and os.path.exists(os.path.join(APP_DIR, model_path)):
+        model_path = os.path.join(APP_DIR, model_path)
+        
+    if size not in MODELS and model_path not in MODELS:
         device = "cpu"
         compute_type = "int8"
         try:
@@ -208,17 +212,21 @@ def get_whisper_model(size="turbo"):
         thread_cnt = min(4, os.cpu_count() or 4)
         if device == "cuda":
             try:
-                print(f"Loading OpenAI Whisper model '{size}' on NVIDIA GPU (CUDA, float16)...")
-                MODELS[size] = WhisperModel(size, device="cuda", compute_type="float16")
+                print(f"Loading OpenAI Whisper model '{model_path}' on NVIDIA GPU (CUDA, float16)...")
+                loaded = WhisperModel(model_path, device="cuda", compute_type="float16")
+                MODELS[size] = loaded
+                MODELS[model_path] = loaded
             except Exception as e:
                 log_error(f"CUDA initialization failed, falling back to CPU: {e}")
                 print(f"CUDA initialization failed, falling back to CPU: {e}")
                 device = "cpu"
         if device == "cpu":
-            print(f"Loading OpenAI Whisper model '{size}' on CPU (int8, {thread_cnt} OpenMP threads)...")
-            MODELS[size] = WhisperModel(size, device="cpu", compute_type="int8", cpu_threads=thread_cnt)
+            print(f"Loading OpenAI Whisper model '{model_path}' on CPU (int8, {thread_cnt} OpenMP threads)...")
+            loaded = WhisperModel(model_path, device="cpu", compute_type="int8", cpu_threads=thread_cnt)
+            MODELS[size] = loaded
+            MODELS[model_path] = loaded
         print(f"Model '{size}' loaded successfully!")
-    return MODELS[size]
+    return MODELS.get(size) or MODELS.get(model_path)
 
 def paste_text_to_window(target_hwnd, text):
     if not text or not target_hwnd:
@@ -533,14 +541,13 @@ class SettingsDialog(QDialog):
 
         # Model Selector with Automatic Warmup Indicator
         self.model_combo = QComboBox()
-        if os.path.exists("models/faster-whisper-custom-voice"):
-            self.model_combo.addItem("🎙️ Мой голос (Custom Voice LoRA)", "models/faster-whisper-custom-voice")
+        self.model_combo.addItem("🎙️ Мой голос (Custom Voice LoRA)", "models/faster-whisper-custom-voice")
         self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Гипер-скорость ~0.3s]", "turbo")
         self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
         self.model_combo.addItem("🏆 Максимум (large-v3)", "large-v3")
         
-        idx_m = self.model_combo.findData(self.cfg.get("model_size", "turbo"))
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "models/faster-whisper-custom-voice"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
