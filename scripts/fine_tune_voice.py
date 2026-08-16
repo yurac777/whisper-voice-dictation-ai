@@ -189,10 +189,9 @@ def run_training(args):
         max_steps=len(samples) * args.epochs // args.batch_size,
         gradient_checkpointing=True,
         fp16=torch.cuda.is_available(),
-        evaluation_strategy="no",
         save_strategy="no",
         logging_steps=5,
-        report_to=["tensorboard"] if "tensorboard" in sys.modules else ["none"]
+        report_to=[]
     )
 
     trainer = Seq2SeqTrainer(
