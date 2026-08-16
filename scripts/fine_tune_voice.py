@@ -218,19 +218,17 @@ def run_training(args):
     processor.save_pretrained(args.output_dir)
     logger.info(f"Merged model saved to: {args.output_dir}")
 
-    # Convert to CTranslate2 (faster-whisper format)
+    # Convert to CTranslate2 (faster-whisper format) using native Python API
     if args.export_ct2:
         logger.info(f"Converting merged model to CTranslate2 format -> {args.ct2_output_dir}...")
         try:
-            import subprocess
-            cmd = [
-                sys.executable, "-m", "ctranslate2.converters.transformers",
-                "--model", args.output_dir,
-                "--output_dir", args.ct2_output_dir,
-                "--quantization", "float16" if torch.cuda.is_available() else "int8",
-                "--force"
-            ]
-            subprocess.run(cmd, check=True)
+            import ctranslate2
+            converter = ctranslate2.converters.TransformersConverter(args.output_dir)
+            converter.convert(
+                args.ct2_output_dir,
+                quantization="float16" if torch.cuda.is_available() else "int8",
+                force=True
+            )
             logger.info("=" * 60)
             logger.info("🎉 SUCCESS! Custom Voice Model is ready for Whisper Voice AI!")
             logger.info(f"CTranslate2 Model Path: {os.path.abspath(args.ct2_output_dir)}")
@@ -238,7 +236,7 @@ def run_training(args):
             logger.info(f"  python main.py --model {os.path.abspath(args.ct2_output_dir)}")
             logger.info("=" * 60)
         except Exception as e:
-            logger.error(f"CTranslate2 conversion failed: {e}. You can manually run:\nct2-transformers-converter --model {args.output_dir} --output_dir {args.ct2_output_dir} --quantization float16")
+            logger.error(f"CTranslate2 conversion error: {e}")
 
 if __name__ == "__main__":
     cli_args = parse_args()
