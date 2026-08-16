@@ -19,6 +19,18 @@ import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 
+# -------------------------------------------------------------
+# Hotfix: Bypass torchao compatibility bug in PEFT / Google Colab
+# -------------------------------------------------------------
+try:
+    import peft.import_utils
+    peft.import_utils.is_torchao_available = lambda: False
+    import peft.tuners.lora.torchao
+    peft.tuners.lora.torchao.is_torchao_available = lambda: False
+    peft.tuners.lora.torchao.dispatch_torchao = lambda *args, **kwargs: None
+except Exception:
+    pass
+
 logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s: %(message)s")
 logger = logging.getLogger("VoiceFineTuner")
 
@@ -74,10 +86,12 @@ def collect_dataset(data_dir: str, history_file: str = None) -> List[Dict[str, s
     return samples
 
 def run_training(args):
-    # Bypass torchao compatibility bug in newer PEFT versions
     try:
         import peft.import_utils
         peft.import_utils.is_torchao_available = lambda: False
+        import peft.tuners.lora.torchao
+        peft.tuners.lora.torchao.is_torchao_available = lambda: False
+        peft.tuners.lora.torchao.dispatch_torchao = lambda *args, **kwargs: None
     except Exception:
         pass
 
