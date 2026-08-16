@@ -5,6 +5,7 @@ __pycache__/
 *.wav
 *.lock
 *.log
+*.zip
 .env
 .env.local
 .vscode/
@@ -16,6 +17,9 @@ Desktop.ini
 build/
 dist/
 *.spec
+
+# Local models and fine-tuned checkpoints
+models/
 
 # Application logs & recordings
 logs/
