@@ -1,6 +1,12 @@
 @echo off
 chcp 65001 >nul
-taskkill /F /FI "IMAGENAME eq pythonw.exe" /FI "WINDOWTITLE eq *main.py*" >nul 2>&1
-taskkill /F /FI "IMAGENAME eq python.exe" /FI "WINDOWTITLE eq *main.py*" >nul 2>&1
-cd /d "C:\Users\Lenovo\Desktop\projects\whisper_dictation"
-start "" "C:\Users\Lenovo\.whisper_env\Scripts\pythonw.exe" "C:\Users\Lenovo\Desktop\projects\whisper_dictation\main.py"
+cd /d "%~dp0"
+
+set "PY_EXE=pythonw.exe"
+if exist "%~dp0.venv\Scripts\pythonw.exe" (
+    set "PY_EXE=%~dp0.venv\Scripts\pythonw.exe"
+) else if exist "%USERPROFILE%\.whisper_env\Scripts\pythonw.exe" (
+    set "PY_EXE=%USERPROFILE%\.whisper_env\Scripts\pythonw.exe"
+)
+
+start "" "%PY_EXE%" "%~dp0main.py"
