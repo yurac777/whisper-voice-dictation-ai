@@ -194,13 +194,17 @@ def run_training(args):
         report_to=[]
     )
 
-    trainer = Seq2SeqTrainer(
-        args=training_args,
-        model=model,
-        train_dataset=processed_dataset,
-        data_collator=data_collator,
-        tokenizer=processor.feature_extractor,
-    )
+    trainer_kwargs = {
+        "args": training_args,
+        "model": model,
+        "train_dataset": processed_dataset,
+        "data_collator": data_collator,
+    }
+
+    try:
+        trainer = Seq2SeqTrainer(**trainer_kwargs, processing_class=processor.feature_extractor)
+    except TypeError:
+        trainer = Seq2SeqTrainer(**trainer_kwargs, tokenizer=processor.feature_extractor)
 
     logger.info("Starting LoRA fine-tuning on personal voice dataset...")
     trainer.train()
