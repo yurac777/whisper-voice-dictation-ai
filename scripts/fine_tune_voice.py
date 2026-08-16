@@ -7,7 +7,7 @@ Automated script for fine-tuning OpenAI Whisper on personal voice recordings,
 training LoRA adapters, merging weights, and exporting to CTranslate2 (faster-whisper).
 
 Usage:
-    python scripts/fine_tune_voice.py --data_dir logs/recordings --model_name openai/whisper-small --epochs 5 --export_ct2
+    python scripts/fine_tune_voice.py --data_dir logs/recordings --base_model openai/whisper-small --epochs 5 --export_ct2
 """
 
 import os
@@ -58,8 +58,8 @@ def collect_dataset(data_dir: str, history_file: str = None) -> List[Dict[str, s
             logger.warning(f"Failed to parse JSONL history ({e}), falling back to file scanning.")
 
     # 2. Scan for matching .wav and .txt files
-    wav_files = glob.glob(os.path.join(data_dir, "*.wav"))
-    for wav in wav_files:
+    wav_files = glob.glob(os.path.join(data_dir, "*.wav")) + glob.glob(os.path.join(data_dir, "**", "*.wav"), recursive=True)
+    for wav in set(wav_files):
         txt = os.path.splitext(wav)[0] + ".txt"
         if os.path.exists(txt):
             try:
@@ -74,6 +74,13 @@ def collect_dataset(data_dir: str, history_file: str = None) -> List[Dict[str, s
     return samples
 
 def run_training(args):
+    # Bypass torchao compatibility bug in newer PEFT versions
+    try:
+        import peft.import_utils
+        peft.import_utils.is_torchao_available = lambda: False
+    except Exception:
+        pass
+
     try:
         import torch
         import torchaudio
