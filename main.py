@@ -541,13 +541,14 @@ class SettingsDialog(QDialog):
 
         # Model Selector with Automatic Warmup Indicator
         self.model_combo = QComboBox()
-        self.model_combo.addItem("🎙️ Мой голос (Custom Voice LoRA)", "models/faster-whisper-custom-voice")
         self.model_combo.addItem("🚀 Турбо ИИ v3 (turbo) [Гипер-скорость ~0.3s]", "turbo")
         self.model_combo.addItem("⚡ Быстрая (small) [Мгновенно]", "small")
         self.model_combo.addItem("🎯 Точная (medium)", "medium")
         self.model_combo.addItem("🏆 Максимум (large-v3)", "large-v3")
+        if os.path.exists("models/faster-whisper-custom-voice"):
+            self.model_combo.addItem("🎙️ Мой голос (Custom Voice LoRA)", "models/faster-whisper-custom-voice")
         
-        idx_m = self.model_combo.findData(self.cfg.get("model_size", "models/faster-whisper-custom-voice"))
+        idx_m = self.model_combo.findData(self.cfg.get("model_size", "turbo"))
         if idx_m >= 0: self.model_combo.setCurrentIndex(idx_m)
         form.addRow("🤖 Модель ИИ:", self.model_combo)
 
