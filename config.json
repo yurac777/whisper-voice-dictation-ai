@@ -9,7 +9,7 @@
   "custom_y": -1,
   "realtime_mode": false,
   "autopaste": true,
-  "model_size": "small",
+  "model_size": "turbo",
   "language": "ru",
   "max_duration_sec": 60,
   "min_duration_sec": 0.2,
